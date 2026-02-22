@@ -1,13 +1,13 @@
 /**
- * FoodScan app theme: greens, white, light gray. Matches reference UI.
+ * FoodScan app theme: greens, white, light gray.
  */
 export const THEME = {
-  /** Primary green for buttons, active tab */
-  primary: "#16a34a",
+  /** Primary green for buttons, active tab (slightly more saturated) */
+  primary: "#15803d",
   /** Brighter green for gradient start */
   primaryBright: "#22c55e",
-  /** Darker green for gradient end / teal-green */
-  primaryDark: "#0d9668",
+  /** Darker green for gradient end */
+  primaryDark: "#166534",
   /** Light pastel green background */
   bgLight: "#e8f7ef",
   /** Slightly lighter at top for gradient */
@@ -26,4 +26,8 @@ export const THEME = {
   darkCard: "#0a0a0a",
   borderDark: "#525252",
   white: "#ffffff",
+  /** Soft shadow for cards */
+  shadowCard: { shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
+  /** Softer shadow for buttons */
+  shadowButton: { shadowColor: "#15803d", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4 },
 } as const;

@@ -3,7 +3,8 @@ import { Tabs } from "expo-router";
 import { useColorScheme, View } from "react-native";
 import { HapticTab } from "@/components/haptic-tab";
 import { THEME } from "@/lib/theme";
-const ICON_SIZE = 24;
+const ICON_SIZE = 22;
+const ACTIVE_CIRCLE_SIZE = 36;
 
 function TabIconWrapper({
   focused,
@@ -17,10 +18,9 @@ function TabIconWrapper({
   return (
     <View
       style={{
-        minWidth: 44,
-        minHeight: 44,
-        paddingHorizontal: 12,
-        borderRadius: 22,
+        width: ACTIVE_CIRCLE_SIZE,
+        height: ACTIVE_CIRCLE_SIZE,
+        borderRadius: ACTIVE_CIRCLE_SIZE / 2,
         backgroundColor: THEME.primary,
         alignItems: "center",
         justifyContent: "center",
@@ -51,7 +51,8 @@ export default function TabLayout() {
           />
         ),
         tabBarButton: HapticTab,
-        tabBarShowLabel: false,
+        tabBarShowLabel: true,
+        tabBarLabelStyle: { fontSize: 11 },
         tabBarActiveTintColor: iconActive,
         tabBarInactiveTintColor: iconInactive,
         tabBarStyle: {

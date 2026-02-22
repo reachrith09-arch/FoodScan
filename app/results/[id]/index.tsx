@@ -1,0 +1,378 @@
+import { useLocalSearchParams, useRouter } from "expo-router";
+import * as React from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  Share,
+  useColorScheme,
+  View,
+} from "react-native";
+import { Image } from "expo-image";
+import {
+  ArrowLeft,
+  BarChart3,
+  Flame,
+  HeartPulse,
+  List,
+  MessageCircle,
+  RefreshCw,
+  Share2,
+  Star,
+  TrendingUp,
+  UtensilsCrossed,
+} from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Button } from "@/components/ui/button.native";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Text } from "@/components/ui/text";
+import { ScoreGauge } from "@/components/graphics/score-gauge";
+import { SubscoreBars } from "@/components/graphics/subscore-bars";
+import { ExpandableSection } from "@/components/expandable-section";
+import { FoodAssistantChat } from "@/components/food-assistant-chat";
+import {
+  addFavorite,
+  getFavorites,
+  getFavoriteNote,
+  getHealthProfile,
+  getScanHistory,
+  isFavorite,
+  removeFavorite,
+  setFavoriteNote,
+  updateScanResult,
+} from "@/lib/storage";
+import type { MealType } from "@/types/food";
+import { getScanContext, getContextNote } from "@/lib/context-aware";
+import { analyzeProduct } from "@/lib/scoring";
+import { getDisplayBrand, getDisplayProductName } from "@/lib/product-display";
+import { useScanResult } from "@/lib/use-scan-result";
+import type { HealthProfile, ScanResult } from "@/types/food";
+
+const SECTION_BUTTONS = [
+  { key: "drivers", label: "Top drivers", route: "drivers", Icon: TrendingUp },
+  { key: "diet", label: "Diet", route: "diet", Icon: UtensilsCrossed },
+  { key: "swaps", label: "Swaps", route: "swaps", Icon: RefreshCw },
+  { key: "nutrition", label: "Nutrition", route: "nutrition", Icon: Flame },
+  { key: "health", label: "Health", route: "health", Icon: HeartPulse },
+  { key: "ingredients", label: "Ingredients", route: "ingredients", Icon: List },
+  { key: "exposure", label: "Exposure", route: "exposure", Icon: BarChart3 },
+] as const;
+
+export default function ResultIndexScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
+  const scheme = useColorScheme();
+  const isDark = scheme === "dark";
+  const textWhite = isDark ? { color: "#ffffff" as const } : undefined;
+  const textMuted = isDark ? { color: "#a1a1aa" as const } : undefined;
+  const iconColor = isDark ? "#ffffff" : "#111827";
+  const insets = useSafeAreaInsets();
+  const headerTopPad = 8;
+  const headerRowHeight = 44;
+  const headerHeight = headerTopPad + headerRowHeight;
+
+  const { result, loading } = useScanResult(id);
+  const [display, setDisplay] = React.useState<ScanResult | null>(null);
+  const [fav, setFav] = React.useState(false);
+  const [favoriteNote, setFavoriteNoteState] = React.useState("");
+  const [profileExists, setProfileExists] = React.useState<boolean | null>(null);
+  const [profile, setProfile] = React.useState<HealthProfile | null>(null);
+  const [chatOpen, setChatOpen] = React.useState(false);
+  const [contextNote, setContextNote] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setDisplay(result);
+  }, [result]);
+
+  React.useEffect(() => {
+    setChatOpen(false);
+  }, [id]);
+
+  React.useEffect(() => {
+    if (!result) return;
+    let mounted = true;
+    (async () => {
+      const p = await getHealthProfile();
+      if (!mounted) return;
+      setProfile(p);
+      setProfileExists(!!p);
+      const nextAnalysis = analyzeProduct(p, result.product);
+      const same = JSON.stringify(result.analysis ?? null) === JSON.stringify(nextAnalysis);
+      if (same) return;
+      const next: ScanResult = {
+        ...result,
+        analysis: nextAnalysis,
+        healthRisks: nextAnalysis.healthRisks,
+      };
+      setDisplay(next);
+      updateScanResult(next).catch(() => {});
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [result]);
+
+  React.useEffect(() => {
+    if (!id) return;
+    isFavorite(id).then(setFav);
+  }, [id]);
+
+  React.useEffect(() => {
+    if (!display?.id || !fav) {
+      setFavoriteNoteState("");
+      return;
+    }
+    getFavoriteNote(display.id).then(setFavoriteNoteState);
+  }, [display?.id, fav]);
+
+  React.useEffect(() => {
+    if (!display) return;
+    let mounted = true;
+    (async () => {
+      const [ctx, p] = await Promise.all([
+        getScanContext(display.mealType, display.timestamp),
+        getHealthProfile(),
+      ]);
+      if (!mounted) return;
+      setContextNote(getContextNote(ctx, p));
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [display?.id, display?.mealType]);
+
+  const toggleFavorite = async () => {
+    if (!display) return;
+    if (fav) {
+      await removeFavorite(display.id);
+      setFav(false);
+    } else {
+      await addFavorite(display);
+      setFav(true);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View className="flex-1 items-center justify-center bg-background" style={isDark ? { backgroundColor: "#000000" } : undefined}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
+  if (!display) {
+    return (
+      <View className="flex-1 items-center justify-center bg-background p-4" style={isDark ? { backgroundColor: "#000000" } : undefined}>
+        <Text className="text-center text-muted-foreground" style={textMuted}>Result not found.</Text>
+        <Button className="mt-4" onPress={() => router.back()} style={isDark ? { borderWidth: 1, borderColor: "#525252" } : undefined}>
+          <Text className="text-primary-foreground">Back</Text>
+        </Button>
+      </View>
+    );
+  }
+
+  const { product } = display;
+  const analysis = display.analysis;
+
+  return (
+    <View
+      className="flex-1 bg-[#F3FBF7] dark:bg-background"
+      style={isDark ? { backgroundColor: "#000000" } : undefined}
+    >
+      <View
+        className="bg-card px-4"
+        style={{
+          height: headerHeight,
+          paddingTop: headerTopPad,
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 20,
+          shadowColor: "#000",
+          shadowOpacity: 0.06,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 3 },
+          elevation: 2,
+        }}
+      >
+        <View className="flex-row items-center justify-between" style={{ height: headerRowHeight }}>
+          <Button variant="ghost" size="icon" onPress={() => router.back()} accessibilityLabel="Go back">
+            <ArrowLeft size={20} color={iconColor} />
+          </Button>
+          <View className="flex-row items-center gap-1">
+            <Button variant="ghost" size="icon" onPress={() => setChatOpen(true)} accessibilityLabel="Ask about this food">
+              <MessageCircle size={20} color={iconColor} />
+            </Button>
+            <Button variant="ghost" size="icon" onPress={() => router.push({ pathname: "/reaction", params: { scanId: display.id } })} accessibilityLabel="Log a body reaction">
+              <HeartPulse size={20} color={iconColor} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onPress={() => {
+                const name = getDisplayProductName(product);
+                const score = analysis?.overallScore ?? 0;
+                Share.share({ message: `${name} — Health score: ${score}/100. Analyzed with FoodScan.`, title: "FoodScan result" });
+              }}
+              accessibilityLabel="Share result"
+            >
+              <Share2 size={20} color={iconColor} />
+            </Button>
+            <Button variant="ghost" size="icon" onPress={toggleFavorite} accessibilityLabel={fav ? "Remove from favorites" : "Save to favorites"}>
+              <Star size={20} color={fav ? "#16a34a" : iconColor} fill={fav ? "#16a34a" : "transparent"} />
+            </Button>
+          </View>
+        </View>
+      </View>
+
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, paddingTop: headerHeight + 8 }}
+      >
+        {(product.image_small_url || product.image_url) && (
+          <View className="mb-3 overflow-hidden rounded-2xl bg-muted" style={{ height: 160 }}>
+            <Image source={{ uri: product.image_small_url ?? product.image_url ?? undefined }} className="h-full w-full" contentFit="cover" />
+          </View>
+        )}
+        <Text className="text-2xl font-semibold text-foreground" style={textWhite}>
+          {getDisplayProductName(product)}
+        </Text>
+        <Text className="mt-1 text-muted-foreground" style={textMuted}>
+          {getDisplayBrand(product) ?? "Unknown"}
+        </Text>
+        <View className="mt-2 flex-row flex-wrap gap-2">
+          <Text className="text-xs text-muted-foreground self-center" style={textMuted}>Log as: </Text>
+          {(["breakfast", "lunch", "dinner", "snack", "other"] as MealType[]).map((meal) => (
+            <Pressable
+              key={meal}
+              onPress={async () => {
+                const next = { ...display, mealType: meal };
+                setDisplay(next);
+                await updateScanResult(next);
+              }}
+              className="rounded-full border px-3 py-1.5"
+              style={{
+                borderColor: display.mealType === meal ? "#16a34a" : isDark ? "#333" : "#e5e7eb",
+                backgroundColor: display.mealType === meal ? "rgba(34,197,94,0.15)" : isDark ? "#1a1a1a" : "transparent",
+              }}
+            >
+              <Text className="text-xs capitalize" style={{ color: display.mealType === meal ? "#16a34a" : isDark ? "#a1a1aa" : "#64748b" }}>{meal}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        {fav && display && (
+          <View className="mt-3">
+            <Text className="mb-1 text-xs text-muted-foreground" style={textMuted}>Note for this favorite</Text>
+            <Input
+              className="min-h-0 border-border bg-muted/30"
+              value={favoriteNote}
+              onChangeText={setFavoriteNoteState}
+              onBlur={() => display.id && setFavoriteNote(display.id, favoriteNote)}
+              placeholder="e.g. good for road trips"
+              style={isDark ? { borderColor: "#525252", color: "#f4f4f5" } : undefined}
+            />
+          </View>
+        )}
+
+        {profileExists === false && (
+          <Card className="mt-4 border-warning bg-warning/10">
+            <CardHeader>
+              <CardTitle style={textWhite}>Generic analysis</CardTitle>
+              <Text className="text-sm text-muted-foreground" style={textMuted}>
+                Create a Health Profile to unlock personalized allergy, condition, and goal-based feedback.
+              </Text>
+            </CardHeader>
+            <CardContent className="gap-2">
+              <Button onPress={() => router.push("/(tabs)/profile")} style={isDark ? { borderWidth: 1, borderColor: "#525252" } : undefined}>
+                <Text className="text-primary-foreground">Create Health Profile</Text>
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {analysis && (
+          <Card
+            className="mt-4"
+            style={{
+              backgroundColor: isDark ? "#0a0a0a" : "#ffffff",
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.06,
+              shadowRadius: 8,
+              elevation: 3,
+              overflow: "hidden",
+            }}
+          >
+            <CardHeader className="pb-2">
+              <CardTitle style={[textWhite, { fontSize: 18 }]}>Health score</CardTitle>
+              {contextNote && (
+                <Text className="mt-1 text-xs text-muted-foreground" style={textMuted}>
+                  {contextNote}
+                </Text>
+              )}
+              <Text className="mt-1.5 text-sm text-muted-foreground leading-5" style={textMuted}>
+                Overall and detailed scoring based on nutrition, additives, processing, diet fit, and your profile.
+              </Text>
+            </CardHeader>
+            <CardContent className="gap-6 pb-6">
+              <View
+                style={{
+                  paddingVertical: 20,
+                  paddingHorizontal: 16,
+                  borderRadius: 12,
+                  backgroundColor: analysis.overallScore >= 75 ? (isDark ? "rgba(34,197,94,0.06)" : "rgba(22,128,61,0.05)") : "transparent",
+                }}
+              >
+                <View style={{ alignItems: "center", marginBottom: 20 }}>
+                  <ScoreGauge score={analysis.overallScore} label={analysis.overallLabel.toUpperCase()} size={140} isDark={isDark} />
+                </View>
+                <View style={{ width: "100%", paddingHorizontal: 4 }}>
+                  <SubscoreBars subscores={analysis.subscores} isDark={isDark} />
+                </View>
+              </View>
+              <ExpandableSection title="Why this score?" defaultOpen={false} isDark={isDark}>
+                <Text className="text-sm text-muted-foreground" style={textMuted}>
+                  The score combines allergens, nutrition, additives, processing, and how well it fits your diet and profile.
+                </Text>
+              </ExpandableSection>
+              <View className="mt-2">
+                <Text className="mb-3 text-sm font-medium text-foreground" style={textWhite}>View details</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 16 }}>
+                  {SECTION_BUTTONS.map(({ key, label, route, Icon }) => (
+                    <Pressable
+                      key={key}
+                      onPress={() => router.push(`/results/${id}/${route}`)}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                        marginRight: 10,
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
+                        borderRadius: 12,
+                        borderWidth: 1.5,
+                        borderColor: isDark ? "#404040" : "#d4d4d8",
+                        backgroundColor: isDark ? "#18181b" : "#f4f4f5",
+                      }}
+                    >
+                      <Icon size={18} color={isDark ? "#a1a1aa" : "#15803d"} strokeWidth={2} />
+                      <Text className="text-sm font-medium" style={{ color: isDark ? "#f4f4f5" : "#18181b" }}>
+                        {label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            </CardContent>
+          </Card>
+        )}
+
+      </ScrollView>
+
+      <FoodAssistantChat visible={chatOpen} onClose={() => setChatOpen(false)} product={product} analysis={analysis ?? undefined} profile={profile} />
+    </View>
+  );
+}

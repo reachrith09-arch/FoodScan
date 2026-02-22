@@ -7,7 +7,6 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Pressable,
-  StyleSheet,
   useColorScheme,
   View,
 } from "react-native";
@@ -25,24 +24,38 @@ import type { ScanResult } from "@/types/food";
 
 const HEADER_HIDE_OFFSET = 140;
 
-const statBoxDark = StyleSheet.create({
+const statBoxDark = {
   box: {
-    backgroundColor: "#383838",
-    borderWidth: 2,
+    backgroundColor: "#1a1a1a",
+    borderWidth: 1,
+    borderLeftWidth: 3,
     borderColor: "#525252",
-    borderRadius: 10,
-    padding: 12,
+    borderLeftColor: THEME.primary,
+    borderRadius: 12,
+    padding: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
   },
-});
-const statBoxLight = StyleSheet.create({
+};
+const statBoxLight = {
   box: {
-    backgroundColor: "#e8f0ec",
-    borderWidth: 2,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderLeftWidth: 3,
     borderColor: THEME.borderLight,
-    borderRadius: 10,
-    padding: 12,
+    borderLeftColor: THEME.primary,
+    borderRadius: 12,
+    padding: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
   },
-});
+};
 
 export default function HistoryScreen() {
   const router = useRouter();
@@ -140,7 +153,29 @@ export default function HistoryScreen() {
           <View>
             {weekly && (
               <View className="pt-2">
-                <Card style={isDark ? { borderWidth: 2, borderColor: "#525252", backgroundColor: "#0a0a0a" } : undefined}>
+                <Card
+                  style={
+                    isDark
+                      ? {
+                          borderWidth: 1,
+                          borderColor: "#333",
+                          backgroundColor: "#0a0a0a",
+                          shadowColor: "#000",
+                          shadowOffset: { width: 0, height: 2 },
+                          shadowOpacity: 0.15,
+                          shadowRadius: 8,
+                          elevation: 3,
+                          borderRadius: 16,
+                        }
+                      : {
+                          shadowColor: "#000",
+                          shadowOffset: { width: 0, height: 2 },
+                          shadowOpacity: 0.06,
+                          shadowRadius: 8,
+                          elevation: 3,
+                        }
+                  }
+                >
                   <CardHeader>
                     <CardTitle style={isDark ? { color: "#ffffff" } : undefined}>Weekly report card</CardTitle>
                     <Text className="text-sm text-muted-foreground" style={isDark ? { color: "#a1a1aa" } : undefined}>
@@ -175,7 +210,17 @@ export default function HistoryScreen() {
                 </Text>
               </View>
             )}
-            <View className="pt-2 pb-1">
+            <View className="pt-2 pb-2 flex-row items-center gap-2">
+              <View
+                style={{
+                  backgroundColor: THEME.primary,
+                  paddingHorizontal: 10,
+                  paddingVertical: 4,
+                  borderRadius: 12,
+                }}
+              >
+                <Text className="text-xs font-semibold text-white">Last scanned</Text>
+              </View>
               <Text className="text-sm text-muted-foreground" style={isDark ? { color: "#a1a1aa" } : undefined}>
                 Last 5 scans
               </Text>
@@ -187,11 +232,20 @@ export default function HistoryScreen() {
           return (
           <Pressable
             onPress={() => router.push(`/results/${item.id}`)}
-            className="mb-1.5 flex-row overflow-hidden rounded-xl border border-border bg-card py-2 pl-0 pr-3"
-            style={isDark ? { borderWidth: 1, borderColor: "#525252" } : undefined}
+            className="mb-2 flex-row overflow-hidden rounded-xl border bg-card py-3 pl-0 pr-4"
+            style={[
+              isDark ? { borderWidth: 1, borderColor: "#333", backgroundColor: "#141414" } : { borderWidth: 1, borderColor: "#e5e7eb", backgroundColor: "#fff" },
+              {
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: isDark ? 0.2 : 0.04,
+                shadowRadius: 4,
+                elevation: 2,
+              },
+            ]}
           >
             {hasImage ? (
-              <View className="mr-2.5 h-12 w-12 overflow-hidden rounded-lg bg-muted">
+              <View className="mr-3 h-14 w-14 overflow-hidden rounded-xl bg-muted">
                 <Image
                   source={{ uri: item.product.image_small_url ?? item.product.image_url ?? undefined }}
                   className="h-full w-full"
@@ -199,7 +253,7 @@ export default function HistoryScreen() {
                 />
               </View>
             ) : (
-              <View style={{ width: 58 }} />
+              <View style={{ width: 62 }} />
             )}
             <View className="flex-1 min-w-0">
               <Text className="font-medium text-foreground" style={isDark ? { color: "#ffffff" } : undefined}>

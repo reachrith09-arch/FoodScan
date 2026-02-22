@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button.native";
 import { Text } from "@/components/ui/text";
 import { addToScanHistory } from "@/lib/storage";
 import { getProductByBarcode } from "@/lib/open-food-facts";
+import { lookupProductOnline } from "@/lib/lookup-product-online";
 import { getHealthProfile } from "@/lib/storage";
 import { analyzeProduct } from "@/lib/scoring";
 import { getCachedProduct, isOnline } from "@/lib/offline";
@@ -74,7 +75,10 @@ export default function ScannerScreen() {
           }
           setOfflineHit(true);
         }
-        const product = await getProductByBarcode(data);
+        let product = await getProductByBarcode(data);
+        if (!product) {
+          product = await lookupProductOnline(`barcode ${data}`, data);
+        }
         if (!product) {
           setNotFound(true);
           setLoading(false);

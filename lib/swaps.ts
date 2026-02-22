@@ -1,5 +1,6 @@
 import type { HealthProfile, ProductResult, ScanResult } from "@/types/food";
-import { searchProducts } from "@/lib/open-food-facts";
+import { searchProductsUnified } from "@/lib/search-products-online";
+import { parseQueryForBrand } from "@/lib/open-food-facts";
 import { analyzeProduct } from "@/lib/scoring";
 
 export interface SwapRecommendation {
@@ -9,17 +10,21 @@ export interface SwapRecommendation {
 }
 
 /**
- * Fetch alternatives using Open Food Facts search and rank by our score.
- * This is a heuristic MVP: product-name search + score sort.
+ * Fetch alternatives using unified search (DB + Google) and rank by our score.
+ * Uses product name + brand to find more alternatives.
  */
 export async function getSwapRecommendations(
   current: ProductResult,
   profile: HealthProfile | null,
   max = 3,
 ): Promise<SwapRecommendation[]> {
-  const q = (current.product_name || "").trim();
+  const fullName = (current.product_name || "").trim();
+  const brand = (current.brands || "").trim();
+  const q = [fullName, brand].filter(Boolean).join(" ").trim();
   if (!q) return [];
-  const results = await searchProducts(q, 15);
+  const { brand: parsedBrand, productTerms } = parseQueryForBrand(q);
+  const searchQuery = parsedBrand && productTerms ? `${productTerms} ${parsedBrand}` : q;
+  const results = await searchProductsUnified(searchQuery, { pageSize: 15, countryCode: profile?.countryCode });
   const filtered = results.filter((p) => p.code && p.code !== current.code);
   const ranked = filtered
     .map((p) => {

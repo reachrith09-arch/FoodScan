@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
 import { addRecentSearch, addToScanHistory, getHealthProfile, getRecentSearches } from "@/lib/storage";
 import { analyzeProduct } from "@/lib/scoring";
-import { searchProducts } from "@/lib/open-food-facts";
+import { searchProductsUnified, enrichProduct } from "@/lib/search-products-online";
 import { getDisplayProductName } from "@/lib/product-display";
 import type { ProductResult } from "@/types/food";
 import type { ScanResult } from "@/types/food";
@@ -24,7 +24,6 @@ import type { ScanResult } from "@/types/food";
 const SUGGEST_DEBOUNCE_MS = 300;
 const MIN_CHARS_FOR_SUGGEST = 2;
 const SUGGEST_RESULTS_COUNT = 6;
-const SEARCH_TIMEOUT_MS = 10000;
 
 export default function SearchScreen() {
   const router = useRouter();
@@ -73,10 +72,13 @@ export default function SearchScreen() {
       setSuggestions([]);
       setSuggesting(true);
       try {
-        const profile = await getHealthProfile();
-        const list = await searchProducts(queryForRequest, SUGGEST_RESULTS_COUNT, SEARCH_TIMEOUT_MS, profile?.countryCode);
+        const profile = await getHealthProfile().catch(() => null);
+        const list = await searchProductsUnified(queryForRequest, {
+          pageSize: SUGGEST_RESULTS_COUNT,
+          countryCode: profile?.countryCode,
+        });
         if (queryRef.current.trim() === queryForRequest) {
-          setSuggestions(list);
+          setSuggestions(list.slice(0, SUGGEST_RESULTS_COUNT));
         }
       } catch {
         if (queryRef.current.trim() === queryForRequest) {
@@ -102,14 +104,24 @@ export default function SearchScreen() {
     const previousSuggestions = suggestions;
     setProducts([]);
     try {
-      const profile = await getHealthProfile();
-      const list = await searchProducts(q, 24, SEARCH_TIMEOUT_MS, profile?.countryCode);
+      const profile = await getHealthProfile().catch(() => null);
+      let list = await searchProductsUnified(q, { pageSize: 30, countryCode: profile?.countryCode });
+      if (list.length === 0) {
+        list = await searchProductsUnified("", { pageSize: 30, countryCode: profile?.countryCode });
+      }
       const results = list.length > 0 ? list : previousSuggestions;
       setProducts(results);
       await addRecentSearch(q);
       setRecentSearches((prev) => [q, ...prev.filter((s) => s.toLowerCase() !== q.toLowerCase())].slice(0, 5));
-    } catch {
-      setProducts(previousSuggestions);
+    } catch (e) {
+      console.error("[Search] search error:", e);
+      try {
+        const profile = await getHealthProfile().catch(() => null);
+        const fallback = await searchProductsUnified("", { pageSize: 30, countryCode: profile?.countryCode });
+        setProducts(fallback.length > 0 ? fallback : previousSuggestions);
+      } catch {
+        setProducts(previousSuggestions);
+      }
     } finally {
       setSearching(false);
     }
@@ -124,14 +136,15 @@ export default function SearchScreen() {
     }
     setLoading(true);
     try {
+      const fullProduct = await enrichProduct(product);
       const profile = await getHealthProfile();
-      const analysis = analyzeProduct(profile, product);
+      const analysis = analyzeProduct(profile, fullProduct);
       const result: ScanResult = {
-        id: `${Date.now()}-${product.code}`,
+        id: `${Date.now()}-${fullProduct.code}`,
         timestamp: Date.now(),
         source: "search",
-        barcode: product.code,
-        product,
+        barcode: fullProduct.code,
+        product: fullProduct,
         healthRisks: analysis.healthRisks,
         analysis,
       };
@@ -266,16 +279,35 @@ export default function SearchScreen() {
             {query.trim().length >= MIN_CHARS_FOR_SUGGEST ? (
               <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
                 <Text className="text-xs font-semibold uppercase tracking-wide" style={{ color: mutedColor, marginBottom: 8 }}>
-                  Suggestions
+                  Top brands in your country
                 </Text>
                 {suggesting ? (
-                  <View style={{ paddingVertical: 16, alignItems: "center" }}>
+                  <View style={{ paddingVertical: 20, alignItems: "center" }}>
                     <ActivityIndicator size="small" color={primaryGreen} />
+                    <Text className="text-sm mt-2" style={{ color: mutedColor }}>Finding products…</Text>
                   </View>
                 ) : suggestions.length === 0 ? (
-                  <Text className="text-sm" style={{ color: mutedColor, paddingVertical: 8 }}>
-                    No suggestions. Tap Search for full results.
-                  </Text>
+                  <View style={{ paddingVertical: 16, alignItems: "center" }}>
+                    <View
+                      style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: 24,
+                        backgroundColor: isDark ? "rgba(34,197,94,0.15)" : "rgba(22,163,74,0.1)",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        marginBottom: 12,
+                      }}
+                    >
+                      <SearchIcon size={24} color={primaryGreen} />
+                    </View>
+                    <Text className="text-sm font-medium" style={{ color: isDark ? "#f4f4f5" : "#18181b", marginBottom: 4 }}>
+                      No suggestions yet
+                    </Text>
+                    <Text className="text-sm" style={{ color: mutedColor, textAlign: "center" }}>
+                      Tap Search to find products
+                    </Text>
+                  </View>
                 ) : (
                   suggestions.map((p, idx) => (
                     <Pressable
@@ -373,10 +405,10 @@ export default function SearchScreen() {
                 Searching…
               </Text>
             </View>
-          ) : !searching && query.trim() ? (
+          ) : !searching && query.trim() && products.length === 0 ? (
             <View style={{ paddingVertical: 32, alignItems: "center", paddingHorizontal: 24 }}>
               <Text className="text-center text-base" style={{ color: mutedColor }}>
-                No products found. Try a different search term or check spelling.
+                No matches for that search. Try another term or check your connection.
               </Text>
             </View>
           ) : !searching && !query.trim() ? (

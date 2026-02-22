@@ -13,13 +13,11 @@ import { Button } from "@/components/ui/button.native";
 import { Text } from "@/components/ui/text";
 import { addToScanHistory, getHealthProfile } from "@/lib/storage";
 import { analyzeProduct } from "@/lib/scoring";
-import { searchProducts } from "@/lib/open-food-facts";
+import { searchProductsUnified, enrichProduct } from "@/lib/search-products-online";
 import { getLastSearchResults } from "@/lib/search-results-store";
 import { getDisplayProductName } from "@/lib/product-display";
 import type { ProductResult } from "@/types/food";
 import type { ScanResult } from "@/types/food";
-
-const SEARCH_TIMEOUT_MS = 10000;
 
 export default function SearchResultsScreen() {
   const router = useRouter();
@@ -41,9 +39,12 @@ export default function SearchResultsScreen() {
     let cancelled = false;
     setLoading(true);
     getHealthProfile()
-      .then((profile) => searchProducts(query, 24, SEARCH_TIMEOUT_MS, profile?.countryCode))
+      .then((profile) => searchProductsUnified(query, { pageSize: 30, countryCode: profile?.countryCode }))
       .then((list) => {
         if (!cancelled) setProducts(list);
+      })
+      .catch(() => {
+        if (!cancelled) setProducts([]);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -56,14 +57,15 @@ export default function SearchResultsScreen() {
   const onSelectProduct = async (product: ProductResult) => {
     setSelecting(true);
     try {
+      const fullProduct = await enrichProduct(product);
       const profile = await getHealthProfile();
-      const analysis = analyzeProduct(profile, product);
+      const analysis = analyzeProduct(profile, fullProduct);
       const result: ScanResult = {
-        id: `${Date.now()}-${product.code}`,
+        id: `${Date.now()}-${fullProduct.code}`,
         timestamp: Date.now(),
         source: "search",
-        barcode: product.code,
-        product,
+        barcode: fullProduct.code,
+        product: fullProduct,
         healthRisks: analysis.healthRisks,
         analysis,
       };
@@ -125,13 +127,12 @@ export default function SearchResultsScreen() {
           </Text>
         </View>
       ) : products.length === 0 ? (
-        <View style={{ paddingVertical: 48, alignItems: "center", paddingHorizontal: 24 }}>
+        <View style={{ paddingVertical: 48, alignItems: "center", paddingHorizontal: 24, gap: 12 }}>
           <Text className="text-center text-base" style={{ color: mutedColor }}>
-            No products found. Try a different search term.
+            No matches for that search. Try another term or check your connection.
           </Text>
           <Button
             variant="outline"
-            className="mt-4"
             onPress={() => router.back()}
           >
             <Text style={{ color: isDark ? "#f4f4f5" : "#18181b" }}>Back to search</Text>

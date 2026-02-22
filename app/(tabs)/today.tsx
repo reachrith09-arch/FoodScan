@@ -128,31 +128,50 @@ export default function TodayScreen() {
         scrollEventThrottle={16}
       >
       <View className="px-4 pt-2">
-      <Card className="mb-3">
+      <Card
+        className="mb-3"
+        style={{
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: isDark ? 0.15 : 0.06,
+          shadowRadius: 8,
+          elevation: 3,
+        }}
+      >
         <CardHeader>
-          <RNText style={[textWhite, { fontSize: titleSize, fontWeight: "600" }]}>Daily totals</RNText>
+          <RNText style={[textWhite, { fontSize: titleSize, fontWeight: "700" }]}>Daily totals</RNText>
           <Text className="text-sm text-muted-foreground" style={textMuted}>Date: {todayKey}</Text>
         </CardHeader>
         <CardContent className="gap-2">
           {today ? (
             <>
               <View className="flex-row flex-wrap gap-4">
-                <View className="rounded-lg border border-border bg-muted/30 p-3">
-                  <Text className="text-xs text-muted-foreground" style={textMuted}>Scans</Text>
-                  <Text className="text-xl font-semibold text-foreground" style={textWhite}>{today.scansCount}</Text>
-                </View>
-                <View className="rounded-lg border border-border bg-muted/30 p-3">
-                  <Text className="text-xs text-muted-foreground" style={textMuted}>Sodium (mg)</Text>
-                  <Text className="text-xl font-semibold text-foreground" style={textWhite}>{Math.round(today.sodiumMgTotal)}</Text>
-                </View>
-                <View className="rounded-lg border border-border bg-muted/30 p-3">
-                  <Text className="text-xs text-muted-foreground" style={textMuted}>Sugar (g)</Text>
-                  <Text className="text-xl font-semibold text-foreground" style={textWhite}>{Math.round(Number(today.sugarGTotal) || 0)}</Text>
-                </View>
-                <View className="rounded-lg border border-border bg-muted/30 p-3">
-                  <Text className="text-xs text-muted-foreground" style={textMuted}>Calories (kcal)</Text>
-                  <Text className="text-xl font-semibold text-foreground" style={textWhite}>{Math.round(today.caloriesKcalTotal)}</Text>
-                </View>
+                {[
+                  { label: "Scans", value: today.scansCount },
+                  { label: "Sodium (mg)", value: Math.round(today.sodiumMgTotal) },
+                  { label: "Sugar (g)", value: Math.round(Number(today.sugarGTotal) || 0) },
+                  { label: "Calories (kcal)", value: Math.round(today.caloriesKcalTotal) },
+                ].map((s) => (
+                  <View
+                    key={s.label}
+                    className="rounded-xl p-3"
+                    style={{
+                      borderWidth: 1,
+                      borderLeftWidth: 3,
+                      borderColor: isDark ? "#333" : THEME.borderLight,
+                      borderLeftColor: THEME.primary,
+                      backgroundColor: isDark ? "#1a1a1a" : "rgba(34,197,94,0.06)",
+                      shadowColor: "#000",
+                      shadowOffset: { width: 0, height: 1 },
+                      shadowOpacity: isDark ? 0.1 : 0.03,
+                      shadowRadius: 4,
+                      elevation: 2,
+                    }}
+                  >
+                    <Text className="text-xs text-muted-foreground" style={textMuted}>{s.label}</Text>
+                    <Text className="text-xl font-semibold text-foreground" style={textWhite}>{s.value}</Text>
+                  </View>
+                ))}
               </View>
               <View className="mt-2 rounded-lg border border-border bg-muted/30 p-3">
                 <Text className="text-xs text-muted-foreground" style={textMuted}>Ultra-processed exposure (avg)</Text>

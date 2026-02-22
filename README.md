@@ -42,6 +42,7 @@ You can start developing by editing the files inside the **app** directory. This
 ## Notes
 
 - **Barcode scanning** works best on a **physical device**. Simulators can be limited.
+- **Online product lookup**: When a product isn't in Open Food Facts, the backend automatically searches the web for product info. Requires Supabase plus `SERPER_API_KEY` in Supabase secrets. Deploy the `lookup-product-online` Edge Function to enable.
 - **Food label scanning (OCR)** is implemented as “photo + manual confirm” (no API key required). You can plug in a real OCR provider later.
 
 ## Get a fresh project

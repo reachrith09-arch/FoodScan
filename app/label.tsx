@@ -23,6 +23,7 @@ import {
   searchProducts,
   LABEL_SEARCH_TIMEOUT_MS,
 } from "@/lib/open-food-facts";
+import { searchProductsUnified } from "@/lib/search-products-online";
 import {
   clearSelectedProductForLabel,
   getSelectedProductForLabel,
@@ -124,7 +125,9 @@ export default function LabelScanScreen() {
   };
 
   const runLookup = async () => {
-    const q = [productName.trim(), brands.trim()].filter(Boolean).join(" ");
+    const prod = productName.trim();
+    const brand = brands.trim();
+    const q = [prod, brand].filter(Boolean).join(" ");
     if (!q) {
       setError("Enter a product name or brand to look up.");
       return;
@@ -132,10 +135,17 @@ export default function LabelScanScreen() {
     setLookupSearching(true);
     setError(null);
     try {
-      const profile = await getHealthProfile();
-      const results = await searchProducts(q, 20, LABEL_SEARCH_TIMEOUT_MS, profile?.countryCode);
-      setLabelLookupResults(results);
-      router.push(`/label-pick?q=${encodeURIComponent(q)}`);
+      const profile = await getHealthProfile().catch(() => null);
+      const merged = await searchProductsUnified(q, {
+        pageSize: 30,
+        countryCode: profile?.countryCode,
+        brandText: brand || undefined,
+      });
+      setLabelLookupResults(merged);
+      const params = new URLSearchParams({ q });
+      if (prod) params.set("product", prod);
+      if (brand) params.set("brand", brand);
+      router.push(`/label-pick?${params.toString()}`);
     } catch {
       setError("Lookup failed. Check your connection and try again.");
     } finally {
@@ -160,7 +170,8 @@ export default function LabelScanScreen() {
 
       if (!hasNutrients) {
         const query = [productName.trim(), brands.trim()].filter(Boolean).join(" ");
-        const found = query ? await searchProducts(query, 5) : [];
+        const profile = await getHealthProfile().catch(() => null);
+        const found = query ? await searchProductsUnified(query, { pageSize: 5, countryCode: profile?.countryCode }) : [];
         if (found.length > 0) {
           product = { ...found[0], code: `manual-${Date.now()}` };
         } else {
@@ -253,12 +264,9 @@ export default function LabelScanScreen() {
         contentContainerStyle={{ padding: 16, paddingTop: headerHeight + 16, paddingBottom: 32 }}
       >
       <View className="mb-4">
-        <Text className="text-2xl font-semibold text-foreground" style={isDark ? { color: "#ffffff" } : undefined}>Food label scan</Text>
+        <Text className="text-2xl font-semibold text-foreground" style={isDark ? { color: "#ffffff" } : undefined}>Describe food</Text>
         <Text className="mt-1 text-muted-foreground" style={isDark ? { color: "#a1a1aa" } : undefined}>
-          Take a photo of the label, then paste/confirm ingredients and nutrition facts. OCR can be plugged in later.
-        </Text>
-        <Text className="mt-2 text-sm text-muted-foreground" style={isDark ? { color: "#a1a1aa" } : undefined}>
-          Don&apos;t have the label? Enter product name and brand, then tap &quot;Look up product&quot; to find it in our database—or check the brand&apos;s website for ingredients and nutrition.
+          Enter what you ate to get a health score and personalized insights.
         </Text>
       </View>
 
@@ -284,30 +292,19 @@ export default function LabelScanScreen() {
           <CardTitle style={isDark ? { color: "#ffffff" } : undefined}>Product details</CardTitle>
         </CardHeader>
         <CardContent className="gap-3">
-          <LabeledInput label="Product name" value={productName} onChange={setProductName} placeholder="e.g. Granola bar" />
-          <LabeledInput label="Brand (optional)" value={brands} onChange={setBrands} placeholder="e.g. Dunkin" />
-          <Button
-            variant="outline"
-            size="sm"
-            onPress={runLookup}
-            disabled={lookupSearching || (!productName.trim() && !brands.trim())}
-            className="flex-row items-center gap-2 self-start"
-          >
-            <Search size={16} color={isDark ? "#ffffff" : "#111827"} />
-            <Text style={isDark ? { color: "#ffffff" } : undefined}>
-              {lookupSearching ? "Searching…" : "Look up product"}
-            </Text>
-          </Button>
+          <LabeledInput label="Product name" value={productName} onChange={setProductName} placeholder="e.g. Granola bar" isDark={isDark} />
+          <LabeledInput label="Brand (optional)" value={brands} onChange={setBrands} placeholder="e.g. Dunkin" isDark={isDark} />
           <View className="gap-1">
             <Text className="text-sm font-medium text-foreground">Ingredients (paste from label)</Text>
             <TextInput
               value={ingredientsText}
               onChangeText={setIngredientsText}
               placeholder="Ingredients list..."
+              placeholderTextColor={isDark ? "#71717a" : undefined}
               multiline
               textAlignVertical="top"
               className="rounded-xl border border-border bg-input-background px-3 py-3 text-foreground"
-              style={{ minHeight: 110 }}
+              style={{ minHeight: 110, color: isDark ? "#ffffff" : undefined }}
             />
           </View>
         </CardContent>
@@ -320,19 +317,31 @@ export default function LabelScanScreen() {
         </CardHeader>
         <CardContent className="gap-3">
           <View className="flex-row gap-2">
-            <LabeledInput label="Calories (kcal)" value={kcal} onChange={setKcal} placeholder="e.g. 250" flex />
-            <LabeledInput label="Sodium (mg)" value={sodiumMg} onChange={setSodiumMg} placeholder="e.g. 400" flex />
+            <LabeledInput label="Calories (kcal)" value={kcal} onChange={setKcal} placeholder="e.g. 250" flex isDark={isDark} />
+            <LabeledInput label="Sodium (mg)" value={sodiumMg} onChange={setSodiumMg} placeholder="e.g. 400" flex isDark={isDark} />
           </View>
           <View className="flex-row gap-2">
-            <LabeledInput label="Sugar (g)" value={sugarG} onChange={setSugarG} placeholder="e.g. 12" flex />
-            <LabeledInput label="Carbs (g)" value={carbs} onChange={setCarbs} placeholder="e.g. 35" flex />
+            <LabeledInput label="Sugar (g)" value={sugarG} onChange={setSugarG} placeholder="e.g. 12" flex isDark={isDark} />
+            <LabeledInput label="Carbs (g)" value={carbs} onChange={setCarbs} placeholder="e.g. 35" flex isDark={isDark} />
           </View>
           <View className="flex-row gap-2">
-            <LabeledInput label="Protein (g)" value={protein} onChange={setProtein} placeholder="e.g. 8" flex />
-            <LabeledInput label="Fat (g)" value={fat} onChange={setFat} placeholder="e.g. 10" flex />
+            <LabeledInput label="Protein (g)" value={protein} onChange={setProtein} placeholder="e.g. 8" flex isDark={isDark} />
+            <LabeledInput label="Fat (g)" value={fat} onChange={setFat} placeholder="e.g. 10" flex isDark={isDark} />
           </View>
           <Button onPress={analyze} disabled={loading}>
             {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-primary-foreground">Analyze label</Text>}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onPress={runLookup}
+            disabled={lookupSearching || (!productName.trim() && !brands.trim())}
+            className="flex-row items-center gap-2"
+          >
+            <Search size={16} color={isDark ? "#ffffff" : "#111827"} />
+            <Text style={isDark ? { color: "#ffffff" } : undefined}>
+              {lookupSearching ? "Searching…" : "Look up product"}
+            </Text>
           </Button>
           <Button variant="ghost" onPress={() => router.back()}>
             <Text className="text-foreground" style={isDark ? { color: "#ffffff" } : undefined}>Cancel</Text>
@@ -350,22 +359,26 @@ function LabeledInput({
   onChange,
   placeholder,
   flex,
+  isDark,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   flex?: boolean;
+  isDark?: boolean;
 }) {
   return (
     <View className={flex ? "flex-1 gap-1" : "gap-1"}>
-      <Text className="text-sm font-medium text-foreground">{label}</Text>
+      <Text className="text-sm font-medium text-foreground" style={isDark ? { color: "#ffffff" } : undefined}>{label}</Text>
       <TextInput
         value={value}
         onChangeText={onChange}
         placeholder={placeholder}
+        placeholderTextColor={isDark ? "#71717a" : undefined}
         keyboardType="default"
         className="rounded-xl border border-border bg-input-background px-3 py-3 text-foreground"
+        style={isDark ? { color: "#ffffff" } : undefined}
       />
     </View>
   );

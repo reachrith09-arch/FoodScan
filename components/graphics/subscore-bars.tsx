@@ -1,9 +1,11 @@
 import * as React from "react";
 import { StyleSheet, View } from "react-native";
+import { AlertTriangle, Flame, FlaskConical, Cog, Heart } from "lucide-react-native";
 import { Text } from "@/components/ui/text";
+import { THEME } from "@/lib/theme";
 
 const BAR_HEIGHT = 8;
-const ROW_MIN_HEIGHT = 38;
+const ROW_MIN_HEIGHT = 44;
 
 interface BarProps {
   label: string;
@@ -11,20 +13,31 @@ interface BarProps {
   isDark?: boolean;
 }
 
+const LABEL_ICONS: Record<string, React.ComponentType<{ size?: number; color?: string }>> = {
+  "Allergen risk": AlertTriangle,
+  "Nutrition": Flame,
+  "Additives": FlaskConical,
+  "Processing": Cog,
+  "Diet fit": Heart,
+};
+
 function Bar({ label, value, isDark }: BarProps) {
   const v = Math.max(0, Math.min(100, Number(value) ?? 0));
   const fillWidthPercent = v;
-  // Green 75–100, yellow 50–75, red 0–50
-  const barColor =
-    v >= 75 ? "#22c55e" : v >= 50 ? "#eab308" : "#ef4444";
+  const barColor = v >= 75 ? THEME.primary : v >= 50 ? "#eab308" : "#ef4444";
   const labelColor = isDark ? "#ffffff" : undefined;
   const valueColor = isDark ? "#a1a1aa" : undefined;
+  const Icon = LABEL_ICONS[label] ?? null;
+  const iconColor = isDark ? "#a1a1aa" : THEME.mutedGrey;
   return (
-    <View style={styles.barRow}>
+    <View style={[styles.barRow, styles.barCard, isDark && styles.barCardDark]}>
       <View style={styles.barLabelRow}>
-        <Text style={[styles.barLabel, labelColor ? { color: labelColor } : undefined]}>
-          {label}
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          {Icon && <Icon size={14} color={iconColor} />}
+          <Text style={[styles.barLabel, labelColor ? { color: labelColor } : undefined]}>
+            {label}
+          </Text>
+        </View>
         <Text style={[styles.barValue, valueColor ? { color: valueColor } : undefined]}>
           {Math.round(v)}
         </Text>
@@ -77,12 +90,26 @@ const styles = StyleSheet.create({
   container: {
     width: "100%",
     minWidth: 140,
-    gap: 12,
+    gap: 14,
   },
   barRow: {
     minHeight: ROW_MIN_HEIGHT,
     width: "100%",
     gap: 4,
+  },
+  barCard: {
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.6)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  barCardDark: {
+    backgroundColor: "rgba(26,26,26,0.8)",
+    shadowOpacity: 0.1,
   },
   barLabelRow: {
     flexDirection: "row",
