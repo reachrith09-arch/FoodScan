@@ -1,10 +1,13 @@
+import { useFocusEffect } from "@react-navigation/native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as React from "react";
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   ScrollView,
   Share,
+  TouchableOpacity,
   useColorScheme,
   View,
 } from "react-native";
@@ -12,6 +15,7 @@ import { Image } from "expo-image";
 import {
   ArrowLeft,
   BarChart3,
+  Crown,
   Flame,
   HeartPulse,
   List,
@@ -47,7 +51,11 @@ import { getScanContext, getContextNote } from "@/lib/context-aware";
 import { analyzeProduct } from "@/lib/scoring";
 import { getDisplayBrand, getDisplayProductName } from "@/lib/product-display";
 import { useScanResult } from "@/lib/use-scan-result";
+import { THEME } from "@/lib/theme";
+import { useSubscription } from "@/lib/revenuecat";
 import type { HealthProfile, ScanResult } from "@/types/food";
+
+const PRO_SECTIONS = new Set(["swaps", "health"]);
 
 const SECTION_BUTTONS = [
   { key: "drivers", label: "Top drivers", route: "drivers", Icon: TrendingUp },
@@ -68,11 +76,17 @@ export default function ResultIndexScreen() {
   const textMuted = isDark ? { color: "#a1a1aa" as const } : undefined;
   const iconColor = isDark ? "#ffffff" : "#111827";
   const insets = useSafeAreaInsets();
-  const headerTopPad = 8;
   const headerRowHeight = 44;
-  const headerHeight = headerTopPad + headerRowHeight;
+  const headerHeight = headerRowHeight;
 
   const { result, loading } = useScanResult(id);
+  const { isPro, refresh: refreshSubscription } = useSubscription();
+
+  useFocusEffect(
+    React.useCallback(() => {
+      refreshSubscription();
+    }, [refreshSubscription]),
+  );
   const [display, setDisplay] = React.useState<ScanResult | null>(null);
   const [fav, setFav] = React.useState(false);
   const [favoriteNote, setFavoriteNoteState] = React.useState("");
@@ -80,6 +94,7 @@ export default function ResultIndexScreen() {
   const [profile, setProfile] = React.useState<HealthProfile | null>(null);
   const [chatOpen, setChatOpen] = React.useState(false);
   const [contextNote, setContextNote] = React.useState<string | null>(null);
+  const [imageExpanded, setImageExpanded] = React.useState(false);
 
   React.useEffect(() => {
     setDisplay(result);
@@ -184,7 +199,6 @@ export default function ResultIndexScreen() {
         className="bg-card px-4"
         style={{
           height: headerHeight,
-          paddingTop: headerTopPad,
           position: "absolute",
           top: 0,
           left: 0,
@@ -195,6 +209,7 @@ export default function ResultIndexScreen() {
           shadowRadius: 10,
           shadowOffset: { width: 0, height: 3 },
           elevation: 2,
+          justifyContent: "center",
         }}
       >
         <View className="flex-row items-center justify-between" style={{ height: headerRowHeight }}>
@@ -229,19 +244,28 @@ export default function ResultIndexScreen() {
 
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, paddingTop: headerHeight + 8 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 24, paddingTop: headerHeight + 4 }}
       >
-        {(product.image_small_url || product.image_url) && (
-          <View className="mb-3 overflow-hidden rounded-2xl bg-muted" style={{ height: 160 }}>
-            <Image source={{ uri: product.image_small_url ?? product.image_url ?? undefined }} className="h-full w-full" contentFit="cover" />
+        {/* Product hero: thumbnail + name side by side */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 }}>
+          {(product.image_small_url || product.image_url) && (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => setImageExpanded(true)}
+              style={{ width: 64, height: 64, borderRadius: 12, overflow: "hidden", backgroundColor: "#e5e7eb", flexShrink: 0 }}
+            >
+              <Image source={{ uri: product.image_small_url ?? product.image_url ?? undefined }} style={{ width: 64, height: 64 }} contentFit="cover" />
+            </TouchableOpacity>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text className="font-bold text-foreground" style={[textWhite, { fontSize: 26, lineHeight: 32 }]}>
+              {getDisplayProductName(product)}
+            </Text>
+            <Text className="text-muted-foreground" style={[textMuted, { fontSize: 16, marginTop: 2 }]}>
+              {getDisplayBrand(product) ?? "Unknown"}
+            </Text>
           </View>
-        )}
-        <Text className="text-2xl font-semibold text-foreground" style={textWhite}>
-          {getDisplayProductName(product)}
-        </Text>
-        <Text className="mt-1 text-muted-foreground" style={textMuted}>
-          {getDisplayBrand(product) ?? "Unknown"}
-        </Text>
+        </View>
         <View className="mt-2 flex-row flex-wrap gap-2">
           <Text className="text-xs text-muted-foreground self-center" style={textMuted}>Log as: </Text>
           {(["breakfast", "lunch", "dinner", "snack", "other"] as MealType[]).map((meal) => (
@@ -341,29 +365,36 @@ export default function ResultIndexScreen() {
               <View className="mt-2">
                 <Text className="mb-3 text-sm font-medium text-foreground" style={textWhite}>View details</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 16 }}>
-                  {SECTION_BUTTONS.map(({ key, label, route, Icon }) => (
-                    <Pressable
-                      key={key}
-                      onPress={() => router.push(`/results/${id}/${route}`)}
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 8,
-                        marginRight: 10,
-                        paddingVertical: 12,
-                        paddingHorizontal: 16,
-                        borderRadius: 12,
-                        borderWidth: 1.5,
-                        borderColor: isDark ? "#404040" : "#d4d4d8",
-                        backgroundColor: isDark ? "#18181b" : "#f4f4f5",
-                      }}
-                    >
-                      <Icon size={18} color={isDark ? "#a1a1aa" : "#15803d"} strokeWidth={2} />
-                      <Text className="text-sm font-medium" style={{ color: isDark ? "#f4f4f5" : "#18181b" }}>
-                        {label}
-                      </Text>
-                    </Pressable>
-                  ))}
+                  {SECTION_BUTTONS.map(({ key, label, route, Icon }) => {
+                    const isLocked = PRO_SECTIONS.has(route) && !isPro;
+                    return (
+                      <Pressable
+                        key={key}
+                        onPress={() => router.push(`/results/${id}/${route}`)}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 8,
+                          marginRight: 10,
+                          paddingVertical: 12,
+                          paddingHorizontal: 16,
+                          borderRadius: 12,
+                          borderWidth: 1.5,
+                          borderColor: isDark ? "#404040" : "#d4d4d8",
+                          backgroundColor: isDark ? "#18181b" : "#f4f4f5",
+                        }}
+                      >
+                        {isLocked ? (
+                          <Crown size={18} color={THEME.primary} strokeWidth={2} />
+                        ) : (
+                          <Icon size={18} color={isDark ? "#a1a1aa" : "#15803d"} strokeWidth={2} />
+                        )}
+                        <Text className="text-sm font-medium" style={{ color: isDark ? "#f4f4f5" : "#18181b" }}>
+                          {label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
                 </ScrollView>
               </View>
             </CardContent>
@@ -373,6 +404,38 @@ export default function ResultIndexScreen() {
       </ScrollView>
 
       <FoodAssistantChat visible={chatOpen} onClose={() => setChatOpen(false)} product={product} analysis={analysis ?? undefined} profile={profile} />
+
+      {/* Full-screen image modal */}
+      <Modal
+        visible={imageExpanded}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setImageExpanded(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", alignItems: "center", justifyContent: "center" }}>
+          <Image
+            source={{ uri: product.image_url ?? product.image_small_url ?? undefined }}
+            style={{ width: "90%", height: "70%", borderRadius: 16 }}
+            contentFit="contain"
+          />
+          <TouchableOpacity
+            onPress={() => setImageExpanded(false)}
+            style={{
+              position: "absolute",
+              top: insets.top + 12,
+              right: 20,
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: "rgba(255,255,255,0.15)",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ color: "#ffffff", fontSize: 18, fontWeight: "600", lineHeight: 20 }}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
     </View>
   );
 }

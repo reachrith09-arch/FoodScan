@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useRouter } from "expo-router";
+import { router } from "expo-router";
 import { Pressable, Text as RNText, useColorScheme, View } from "react-native";
 import { User, ScanBarcode } from "lucide-react-native";
 import { Text } from "@/components/ui/text";
@@ -29,7 +29,6 @@ export function AppHeader({
   rightIcon,
   rightLabel = "Open profile",
 }: AppHeaderProps) {
-  const router = useRouter();
   const scheme = useColorScheme();
   const isDark = scheme === "dark";
   const iconColor = isDark ? THEME.white : THEME.primary;

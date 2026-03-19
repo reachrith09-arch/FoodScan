@@ -1,10 +1,12 @@
 import { useFocusEffect } from "@react-navigation/native";
+import { useRouter } from "expo-router";
 import * as React from "react";
 import {
   Alert,
   Animated,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  Pressable,
   Share,
   Text as RNText,
   View,
@@ -13,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme as useNativeWindScheme } from "nativewind";
 import { useColorScheme } from "react-native";
 import { Appearance } from "react-native";
+import { Crown } from "lucide-react-native";
 import { AppHeader } from "@/components/app-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -21,10 +24,13 @@ import { Button } from "@/components/ui/button.native";
 import { THEME } from "@/lib/theme";
 import { exportUserData, getSettings, setSettings } from "@/lib/storage";
 import { BODY_SIZES, TITLE_SIZES, useFontSize, useUnits } from "@/lib/use-settings";
+import { useSubscription } from "@/lib/revenuecat";
 
 const HEADER_HIDE_OFFSET = 140;
 
 export default function SettingsScreen() {
+  const router = useRouter();
+  const { isPro, showPaywall } = useSubscription();
   const { setColorScheme: setNativeWindScheme } = useNativeWindScheme();
   const insets = useSafeAreaInsets();
   const headerHeight = React.useMemo(() => insets.top + 54, [insets.top]);
@@ -155,6 +161,58 @@ export default function SettingsScreen() {
         keyboardShouldPersistTaps="handled"
       >
       <View className="px-4 pt-2">
+      {!isPro ? (
+        <Pressable onPress={() => showPaywall()}>
+          <Card className="mb-4" style={{ borderWidth: 2, borderColor: THEME.primary }}>
+            <CardContent className="flex-row items-center gap-3 py-4">
+              <Crown size={24} color={THEME.primary} />
+              <View style={{ flex: 1 }}>
+                <RNText style={[{ fontSize: 16, fontWeight: "700" }, textWhite]}>
+                  Upgrade to FoodScan Pro
+                </RNText>
+                <Text className="text-sm text-muted-foreground" style={textMuted}>
+                  Unlimited scans, AI assistant, full analysis
+                </Text>
+              </View>
+              <RNText style={{ fontSize: 20, color: THEME.primary }}>→</RNText>
+            </CardContent>
+          </Card>
+        </Pressable>
+      ) : (
+        <Card className="mb-4" style={{ borderWidth: 2, borderColor: THEME.primary }}>
+          <CardContent className="flex-row items-center gap-3 py-4">
+            <Crown size={24} color={THEME.primary} />
+            <View style={{ flex: 1 }}>
+              <RNText style={[{ fontSize: 16, fontWeight: "700" }, textWhite]}>
+                FoodScan Pro
+              </RNText>
+              <Text className="text-sm text-muted-foreground" style={textMuted}>
+                You have full access to all features
+              </Text>
+            </View>
+          </CardContent>
+        </Card>
+      )}
+
+      <Pressable
+        onPress={() => router.push("/paywall-test")}
+        style={({ pressed }) => ({
+          opacity: pressed ? 0.7 : 1,
+          marginBottom: 16,
+          paddingVertical: 12,
+          paddingHorizontal: 16,
+          borderRadius: 10,
+          borderWidth: 1,
+          borderColor: THEME.primary + "66",
+          backgroundColor: THEME.primary + "11",
+          alignSelf: "flex-start",
+        })}
+      >
+        <RNText style={[{ fontSize: 14, fontWeight: "600" }, { color: THEME.primary }]}>
+          Test paywall
+        </RNText>
+      </Pressable>
+
       <Card className="mb-4">
         <CardHeader className="pb-1">
           <CardTitle style={textWhite}>Units</CardTitle>

@@ -616,7 +616,7 @@ export async function getPopularProductsInCountry(
         return await searchProducts(term, Math.ceil(pageSize / 3), timeoutMs, cc);
       } catch (e) {
         if (attempt === retries && __DEV__) {
-          console.error("[getPopularProductsInCountry] term failed:", term, (e as Error)?.message ?? e);
+          console.warn("[getPopularProductsInCountry] term skipped:", term, (e as Error)?.message ?? e);
         }
       }
     }

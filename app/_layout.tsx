@@ -5,6 +5,7 @@ import "react-native-reanimated";
 import "@/global.css";
 import { THEME } from "@/lib/theme";
 import { FontSizeProvider, UnitsProvider } from "@/lib/use-settings";
+import { SubscriptionProvider } from "@/lib/revenuecat";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export const unstable_settings = {
@@ -20,6 +21,7 @@ export default function RootLayout() {
     RNStatusBar.setBarStyle(barStyle, true);
   }, [barStyle]);
   return (
+    <SubscriptionProvider>
     <FontSizeProvider>
       <UnitsProvider>
       <View style={{ flex: 1, backgroundColor }}>
@@ -32,5 +34,6 @@ export default function RootLayout() {
       </View>
       </UnitsProvider>
     </FontSizeProvider>
+    </SubscriptionProvider>
   );
 }

@@ -1,4 +1,5 @@
 import { Activity, History, ScanBarcode, Settings, User } from "lucide-react-native";
+import * as React from "react";
 import { Tabs } from "expo-router";
 import { useColorScheme, View } from "react-native";
 import { HapticTab } from "@/components/haptic-tab";
@@ -37,35 +38,38 @@ export default function TabLayout() {
   const iconActive = THEME.white;
   const iconInactive = isDark ? "#a1a1aa" : THEME.mutedGrey;
 
+  const screenOptions = React.useMemo(
+    () => ({
+      headerShown: false,
+      tabBarBackground: () => (
+        <View
+          className="flex-1 border-t"
+          style={{
+            backgroundColor: isDark ? THEME.darkBg : THEME.cardLight,
+            borderTopColor: isDark ? THEME.borderDark : THEME.borderLight,
+          }}
+        />
+      ),
+      tabBarButton: HapticTab,
+      tabBarShowLabel: true,
+      tabBarLabelStyle: { fontSize: 11 },
+      tabBarActiveTintColor: iconActive,
+      tabBarInactiveTintColor: iconInactive,
+      tabBarStyle: {
+        paddingTop: 10,
+        minHeight: 56,
+        elevation: 0,
+        shadowOpacity: 0,
+        borderTopWidth: 1,
+        borderTopColor: isDark ? THEME.borderDark : THEME.borderLight,
+        backgroundColor: isDark ? THEME.darkBg : THEME.cardLight,
+      },
+    }),
+    [isDark, iconActive, iconInactive],
+  );
+
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarBackground: () => (
-          <View
-            className="flex-1 border-t"
-            style={{
-              backgroundColor: isDark ? THEME.darkBg : THEME.cardLight,
-              borderTopColor: isDark ? THEME.borderDark : THEME.borderLight,
-            }}
-          />
-        ),
-        tabBarButton: HapticTab,
-        tabBarShowLabel: true,
-        tabBarLabelStyle: { fontSize: 11 },
-        tabBarActiveTintColor: iconActive,
-        tabBarInactiveTintColor: iconInactive,
-        tabBarStyle: {
-          paddingTop: 10,
-          minHeight: 56,
-          elevation: 0,
-          shadowOpacity: 0,
-          borderTopWidth: 1,
-          borderTopColor: isDark ? THEME.borderDark : THEME.borderLight,
-          backgroundColor: isDark ? THEME.darkBg : THEME.cardLight,
-        },
-      }}
-    >
+    <Tabs screenOptions={screenOptions}>
       <Tabs.Screen
         name="index"
         options={{

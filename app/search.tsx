@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "@/components/ui/button.native";
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
+import { getMatchingSuggestions } from "@/data/search-suggestions";
 import { addRecentSearch, addToScanHistory, getHealthProfile, getRecentSearches } from "@/lib/storage";
 import { analyzeProduct } from "@/lib/scoring";
 import { searchProductsUnified, enrichProduct } from "@/lib/search-products-online";
@@ -158,9 +159,10 @@ export default function SearchScreen() {
   const recentFiltered = query.trim()
     ? recentSearches.filter((s) => s.toLowerCase().startsWith(query.trim().toLowerCase()))
     : recentSearches.slice(0, 5);
+  const wordSuggestions = getMatchingSuggestions(query, 6);
   const showDropdown =
     showSuggestions &&
-    (recentFiltered.length > 0 || query.length >= 1 || suggestions.length > 0 || suggesting);
+    (wordSuggestions.length > 0 || recentFiltered.length > 0 || query.length >= 1 || suggestions.length > 0 || suggesting);
 
   const insets = useSafeAreaInsets();
   const searchBg = isDark ? "#0a0a0a" : "#f8fafc";
@@ -262,6 +264,27 @@ export default function SearchScreen() {
           }}
         >
           <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled style={{ maxHeight: 276 }}>
+            {wordSuggestions.length > 0 && (
+              <View style={{ paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor }}>
+                <Text className="text-xs font-semibold uppercase tracking-wide" style={{ color: mutedColor, marginBottom: 8 }}>
+                  Suggestions
+                </Text>
+                {wordSuggestions.map((term) => (
+                  <Pressable
+                    key={term}
+                    onPress={() => {
+                      setQuery(term);
+                      search(term);
+                    }}
+                    style={{ paddingVertical: 10 }}
+                  >
+                    <Text className="text-base" style={{ color: isDark ? "#f4f4f5" : "#18181b" }}>
+                      {term}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
             {recentFiltered.length > 0 && (
               <View style={{ paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor }}>
                 <Text className="text-xs font-semibold uppercase tracking-wide" style={{ color: mutedColor, marginBottom: 8 }}>

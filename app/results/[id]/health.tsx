@@ -1,14 +1,17 @@
+import { useFocusEffect } from "@react-navigation/native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as React from "react";
 import { ActivityIndicator, ScrollView, useColorScheme, View } from "react-native";
 import { AlertTriangle, Info, ShieldAlert } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "@/components/ui/button.native";
+import { ProFeaturePaywall } from "@/components/pro-feature-paywall";
 import { ResultHeader } from "@/components/result-header";
 import { Text } from "@/components/ui/text";
 import { FoodAssistantChat } from "@/components/food-assistant-chat";
 import { getHealthProfile } from "@/lib/storage";
 import { useScanResult } from "@/lib/use-scan-result";
+import { useSubscription } from "@/lib/revenuecat";
 import { THEME } from "@/lib/theme";
 
 const severityConfig: Record<string, { border: string; bg: string; icon: typeof ShieldAlert }> = {
@@ -25,7 +28,14 @@ export default function HealthScreen() {
   const insets = useSafeAreaInsets();
   const textWhite = isDark ? { color: "#ffffff" } : undefined;
   const textMuted = isDark ? { color: "#a1a1aa" } : undefined;
+  const { isPro, showPaywall, refresh: refreshSubscription } = useSubscription();
   const { result, loading } = useScanResult(id);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      refreshSubscription();
+    }, [refreshSubscription]),
+  );
   const [profile, setProfile] = React.useState<Awaited<ReturnType<typeof getHealthProfile>> | null>(null);
   const [chatOpen, setChatOpen] = React.useState(false);
 
@@ -46,6 +56,22 @@ export default function HealthScreen() {
         <Text className="text-muted-foreground">Result not found.</Text>
         <Button className="mt-4" onPress={() => router.back()}><Text>Back</Text></Button>
       </View>
+    );
+  }
+
+  if (!isPro) {
+    return (
+      <ProFeaturePaywall
+        title="Health insights"
+        subtitle="Personalized feedback based on your allergies, conditions, and goals"
+        featureName="Health insights"
+        description="Upgrade to FoodScan Pro for personalized health insights, allergy alerts, and more."
+        onClose={() => router.back()}
+        onUnlock={async () => {
+          const purchased = await showPaywall();
+          if (purchased) refreshSubscription();
+        }}
+      />
     );
   }
 

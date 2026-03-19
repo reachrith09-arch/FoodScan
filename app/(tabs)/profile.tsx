@@ -171,31 +171,31 @@ export default function ProfileScreen() {
             </CardHeader>
             <CardContent className="gap-6">
               <TagSection
-                label="Conditions (e.g. diabetes, hypertension, celiac)"
+                label="Conditions"
                 value={profile.conditions}
                 onChange={(v) => setProfile((p) => ({ ...p, conditions: v }))}
-                placeholder="e.g. diabetes"
+                placeholder="e.g. diabetes, IBS, GERD, gout, PCOS, celiac"
                 isDark={isDark}
               />
               <TagSection
                 label="Allergies"
                 value={profile.allergies}
                 onChange={(v) => setProfile((p) => ({ ...p, allergies: v }))}
-                placeholder="e.g. nuts, dairy, gluten"
+                placeholder="e.g. nuts, dairy, sesame, shellfish, eggs, soy"
                 isDark={isDark}
               />
               <TagSection
                 label="Dietary preferences"
                 value={profile.dietaryPreferences}
                 onChange={(v) => setProfile((p) => ({ ...p, dietaryPreferences: v }))}
-                placeholder="e.g. vegan, vegetarian, gluten-free"
+                placeholder="e.g. vegan, keto, halal, paleo, low FODMAP"
                 isDark={isDark}
               />
               <TagSection
                 label="Medications (optional)"
                 value={profile.medications ?? []}
                 onChange={(v) => setProfile((p) => ({ ...p, medications: v }))}
-                placeholder="e.g. MAOI, blood thinners"
+                placeholder="e.g. warfarin, statins, metformin, MAOI"
                 optional
                 isDark={isDark}
               />
@@ -203,7 +203,7 @@ export default function ProfileScreen() {
                 label="Goals"
                 value={profile.goals}
                 onChange={(v) => setProfile((p) => ({ ...p, goals: v }))}
-                placeholder="e.g. weight loss, muscle gain, blood sugar control"
+                placeholder="e.g. weight loss, heart health, gut health, anti-inflammatory"
                 isDark={isDark}
               />
             </CardContent>

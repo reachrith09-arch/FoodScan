@@ -7,10 +7,11 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Pressable,
+  StyleSheet,
+  TouchableOpacity,
   useColorScheme,
   View,
 } from "react-native";
-import { Image } from "expo-image";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppHeader } from "@/components/app-header";
@@ -70,6 +71,19 @@ export default function HistoryScreen() {
   const [history, setHistory] = React.useState<ScanResult[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [weekly, setWeekly] = React.useState<Awaited<ReturnType<typeof getWeeklyReportCard>> | null>(null);
+
+  // Compute the actual Sun–Sat week range label
+  const weekRangeLabel = React.useMemo(() => {
+    const now = new Date();
+    const sun = new Date(now);
+    sun.setDate(now.getDate() - now.getDay());
+    sun.setHours(0, 0, 0, 0);
+    const sat = new Date(sun);
+    sat.setDate(sun.getDate() + 6);
+    const fmt = (d: Date) =>
+      d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    return `${fmt(sun)} – ${fmt(sat)}, ${sat.getFullYear()}`;
+  }, []);
 
   const LAST_SCANS_COUNT = 5;
 
@@ -146,7 +160,7 @@ export default function HistoryScreen() {
         data={history}
         keyExtractor={(item) => item.id}
         style={{ backgroundColor: isDark ? THEME.darkBg : THEME.bgLight }}
-        contentContainerStyle={{ paddingHorizontal: 8, paddingTop: headerHeight, paddingBottom: insets.bottom + 24 }}
+        contentContainerStyle={{ paddingHorizontal: 12, paddingTop: headerHeight, paddingBottom: insets.bottom + 24 }}
         onScroll={onScroll}
         scrollEventThrottle={16}
         ListHeaderComponent={
@@ -179,7 +193,7 @@ export default function HistoryScreen() {
                   <CardHeader>
                     <CardTitle style={isDark ? { color: "#ffffff" } : undefined}>Weekly report card</CardTitle>
                     <Text className="text-sm text-muted-foreground" style={isDark ? { color: "#a1a1aa" } : undefined}>
-                      {weekly.weekStartDateKey} → {weekly.weekEndDateKey}
+                      {weekRangeLabel}
                     </Text>
                   </CardHeader>
                   <CardContent className="flex-row flex-wrap gap-3">
@@ -188,17 +202,32 @@ export default function HistoryScreen() {
                       <Text className="text-lg font-semibold text-foreground" style={isDark ? { color: "#ffffff" } : undefined}>{weekly.totalScans}</Text>
                     </View>
                     <View style={isDark ? statBoxDark.box : statBoxLight.box}>
-                      <Text className="text-xs text-muted-foreground" style={isDark ? { color: "#a1a1aa" } : undefined}>Avg score</Text>
-                      <Text className="text-lg font-semibold text-foreground" style={isDark ? { color: "#ffffff" } : undefined}>{weekly.avgOverallScore}</Text>
-                    </View>
-                    <View style={isDark ? statBoxDark.box : statBoxLight.box}>
-                      <Text className="text-xs text-muted-foreground" style={isDark ? { color: "#a1a1aa" } : undefined}>Avg UPF</Text>
-                      <Text className="text-lg font-semibold text-foreground" style={isDark ? { color: "#ffffff" } : undefined}>{weekly.avgUltraProcessed}</Text>
-                    </View>
-                    <View style={isDark ? statBoxDark.box : statBoxLight.box}>
                       <Text className="text-xs text-muted-foreground" style={isDark ? { color: "#a1a1aa" } : undefined}>Critical</Text>
                       <Text className="text-lg font-semibold text-foreground" style={isDark ? { color: "#ffffff" } : undefined}>{weekly.totalCriticalAlerts}</Text>
                     </View>
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      onPress={() => router.push("/pattern-hints")}
+                      style={[
+                        isDark ? statBoxDark.box : statBoxLight.box,
+                        { borderLeftColor: THEME.primary },
+                      ]}
+                    >
+                      <Text className="text-xs text-muted-foreground" style={isDark ? { color: "#a1a1aa" } : undefined}>Patterns</Text>
+                      <Text style={{ fontSize: 13, fontWeight: "600", color: THEME.primary, marginTop: 2 }}>View hints →</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      onPress={() => router.push("/weekly-reactions")}
+                      style={[
+                        isDark ? statBoxDark.box : statBoxLight.box,
+                        { borderLeftColor: THEME.primary, flexDirection: "row", alignItems: "center", gap: 6 },
+                      ]}
+                    >
+                      <Text style={{ fontSize: 13, fontWeight: "600", color: THEME.primary }}>
+                        Body reactions →
+                      </Text>
+                    </TouchableOpacity>
                   </CardContent>
                 </Card>
               </View>
@@ -228,13 +257,20 @@ export default function HistoryScreen() {
           </View>
         }
         renderItem={({ item }) => {
-          const hasImage = !!(item.product.image_small_url || item.product.image_url);
           return (
           <Pressable
             onPress={() => router.push(`/results/${item.id}`)}
-            className="mb-2 flex-row overflow-hidden rounded-xl border bg-card py-3 pl-0 pr-4"
             style={[
-              isDark ? { borderWidth: 1, borderColor: "#333", backgroundColor: "#141414" } : { borderWidth: 1, borderColor: "#e5e7eb", backgroundColor: "#fff" },
+              {
+                marginBottom: 8,
+                borderRadius: 12,
+                borderWidth: 1,
+                paddingVertical: 12,
+                paddingHorizontal: 14,
+              },
+              isDark
+                ? { borderColor: "#333", backgroundColor: "#141414" }
+                : { borderColor: "#e5e7eb", backgroundColor: "#fff" },
               {
                 shadowColor: "#000",
                 shadowOffset: { width: 0, height: 1 },
@@ -244,18 +280,7 @@ export default function HistoryScreen() {
               },
             ]}
           >
-            {hasImage ? (
-              <View className="mr-3 h-14 w-14 overflow-hidden rounded-xl bg-muted">
-                <Image
-                  source={{ uri: item.product.image_small_url ?? item.product.image_url ?? undefined }}
-                  className="h-full w-full"
-                  contentFit="cover"
-                />
-              </View>
-            ) : (
-              <View style={{ width: 62 }} />
-            )}
-            <View className="flex-1 min-w-0">
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Text className="font-medium text-foreground" style={isDark ? { color: "#ffffff" } : undefined}>
                 {getDisplayProductName(item.product)}
               </Text>

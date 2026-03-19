@@ -59,17 +59,28 @@ function guessIngredientFromQuestion(question: string, product?: ProductResult):
   // Extract ingredient from question phrasing (works with or without a scanned product).
   const m =
     q.match(/\bwhat does (.+?) mean\b/) ??
-    q.match(/\bwhat is (.+?)\b/) ??
-    q.match(/\bwhat's (.+?)\b/) ??
-    q.match(/\bexplain (.+?)\b/) ??
-    q.match(/\btell me about (.+?)\b/);
+    q.match(/\bwhat(?:'s| is) (.+?)(?:\?|$)/) ??
+    q.match(/\bexplain (.+?)(?:\?|$)/) ??
+    q.match(/\btell me about (.+?)(?:\?|$)/) ??
+    q.match(/\bis (.+?) (?:safe|bad|good|healthy|ok)/) ??
+    q.match(/\bwhy (?:is|does) (.+?) /);
   if (m?.[1]) {
     const term = m[1].trim();
-    if (term.length < 3) return null;
-    if (/^(a|an|the|this)$/i.test(term)) return null;
+    if (term.length < 2) return null;
+    if (/^(a|an|the|this|it|that)$/i.test(term)) return null;
     if (/\b(healthier|option|alternative|swap|substitute|ingredients?|this product|this food)\b/.test(term))
       return null;
     return term;
+  }
+
+  // If the question IS the ingredient name (bare word/phrase, no verb), treat it as "what is X?"
+  // e.g. user typed "dextrose" or "xanthan gum" or "E415"
+  const cleanQ = q.replace(/[?!.,]+$/, "").trim();
+  const stopWords = /^(what|why|how|is|are|can|does|do|should|tell|explain|the|a|an|this|that|it|give|show|help|i|me|my|about|for|in|on|at|to|of|and|or)$/;
+  const words = cleanQ.split(/\s+/);
+  const isLikelyBareName = words.length <= 5 && !words.some((w) => stopWords.test(w.toLowerCase())) && !/\b(healthy|bad|good|safe|alternative|swap)\b/.test(cleanQ);
+  if (isLikelyBareName && cleanQ.length >= 2) {
+    return cleanQ;
   }
 
   return null;
@@ -476,72 +487,245 @@ function answerFoodQuestionLocal(args: {
   const detail = getIngredientDetail(guessed) ?? getIngredientDetail(guessedEn);
   if (detail) {
     const displayName = toIngredientDisplayCase(detail.name);
-    const lines = [
-      displayName,
-      `${detail.plainDescription}`,
-      `Typical use: ${detail.typicalUse}`,
-      `Health notes: ${detail.healthConsideration}`,
-      args.profile
-        ? "Tip: Your Health Profile is set, so warnings in the Results screen are personalized."
-        : "Tip: Create a Health Profile to unlock personalized warnings (allergies/conditions/goals).",
-    ];
+    // Compact format: name + one flowing paragraph combining what it is, why it's used, and health notes
+    const body = `${detail.plainDescription} ${detail.healthConsideration}`;
+    const lines = [displayName, body];
     if (reactionTip) lines.push(reactionTip);
     return lines.join("\n");
   }
 
-  // No curated entry: try translated name for generic pattern, then use universal fallback.
-  const generic = genericIngredientExplanation(guessed) ?? genericIngredientExplanation(guessedEn);
-  if (generic) {
-    const nameForDisplay = genericIngredientExplanation(guessedEn) ? guessedEn : guessed;
-    return [toIngredientDisplayCase(nameForDisplay), generic].join("\n");
-  }
-
+  // No curated entry: use universal ingredient explainer (works for any ingredient).
   const displayName = toIngredientDisplayCase(guessedEn || guessed);
-  return [
-    `${displayName} is in this product's ingredients.`,
-    "It's often used for texture, flavour, or preservation in packaged foods. Check the label for the exact amount. You can also ask about the score, allergens, or a healthier alternative.",
-  ].join("\n");
+  return [displayName, universalIngredientAnswer(guessedEn || guessed, args.product)].join("\n");
 }
 
 /**
- * Short generic explanation when we don't have a curated entry.
- * Enables answering "what does X mean" for any food.
+ * Universal ingredient explainer — works for ANY ingredient.
+ * Large inline lookup of common whole foods + smart heuristics for everything else.
  */
-function genericIngredientExplanation(term: string): string | null {
+function universalIngredientAnswer(term: string, product?: ProductResult): string {
   const t = normalize(term);
-  if (!t) return null;
+  if (!t) return "Could not identify this ingredient.";
+  const display = term.trim();
 
-  // E-number (e.g. E150d, E338)
-  if (/^e\s?\d{3,4}[a-z]?$/.test(t.replace(/\s/g, ""))) {
-    return "An E-number is a code for an additive approved for use in food in the EU. The number indicates the type (e.g. colours, preservatives, acids). They are regulated and considered safe at permitted levels.";
+  const FOODS: Record<string, string> = {
+    potato: "A starchy root vegetable rich in potassium, vitamin C, and fibre (with skin). Naturally gluten-free. One of the most filling foods per calorie.",
+    potatoes: "Starchy root vegetables rich in potassium, vitamin C, and fibre (with skin). Naturally gluten-free. One of the most filling foods per calorie.",
+    tomato: "A fruit rich in lycopene (a powerful antioxidant), vitamin C, and potassium. Cooking tomatoes increases lycopene availability.",
+    tomatoes: "Fruits rich in lycopene (a powerful antioxidant), vitamin C, and potassium. Cooking tomatoes increases lycopene availability.",
+    onion: "A vegetable with natural prebiotic fibres that support gut health. Contains quercetin, an antioxidant with anti-inflammatory properties.",
+    onions: "Vegetables with natural prebiotic fibres that support gut health. Contain quercetin, an antioxidant with anti-inflammatory properties.",
+    garlic: "A flavouring vegetable with allicin, a compound with antimicrobial and heart-health properties. Used in small amounts for flavour.",
+    chicken: "A lean source of protein (~31g per 100g cooked breast) and B vitamins, especially niacin. Lower in saturated fat than red meat.",
+    beef: "A red meat high in protein (~26g per 100g), iron (heme iron, well absorbed), zinc, and B12. Higher in saturated fat than poultry or fish.",
+    pork: "A red meat high in protein, B vitamins (especially thiamin), and zinc. Processed pork (bacon, ham) often has added sodium and nitrites.",
+    turkey: "A lean protein source (~29g per 100g) low in fat, rich in B vitamins and selenium. One of the leanest meat options.",
+    lamb: "A red meat rich in protein, iron, zinc, and B12. Higher in saturated fat than chicken. Grass-fed lamb has more omega-3s.",
+    fish: "Rich in protein, omega-3 fatty acids (especially oily fish like salmon and mackerel), and vitamin D. Omega-3s support heart and brain health.",
+    salmon: "An oily fish rich in omega-3 fatty acids (EPA and DHA), protein, and vitamin D. One of the best food sources of omega-3s for heart and brain health.",
+    tuna: "A lean fish high in protein and omega-3s. Canned tuna can contain mercury — limit to 2–3 servings per week, especially during pregnancy.",
+    shrimp: "A shellfish low in calories, high in protein, and rich in selenium and iodine. A common allergen — avoid if allergic to shellfish.",
+    prawns: "Shellfish low in calories, high in protein, selenium, and iodine. A common allergen — avoid if allergic to shellfish.",
+    egg: "One of the most nutrient-dense foods: protein (~6g each), choline, B12, and vitamin D. The cholesterol in eggs has less effect on blood cholesterol than once thought.",
+    eggs: "Nutrient-dense: protein (~6g each), choline, B12, and vitamin D. One of the top 14 allergens.",
+    rice: "A gluten-free grain and staple carb. Brown rice has more fibre, B vitamins, and magnesium. White rice is refined and digests faster.",
+    pasta: "A wheat-based carb that provides energy and some protein. Contains gluten — avoid if you have coeliac disease. Whole wheat pasta has more fibre.",
+    bread: "A wheat-based staple providing carbs, some protein, and B vitamins. Contains gluten. Whole grain versions have more fibre and nutrients.",
+    wheat: "A cereal grain and major source of carbs, protein (gluten), and B vitamins. One of the top 14 allergens. Avoid if you have coeliac disease.",
+    corn: "A naturally gluten-free grain rich in fibre, B vitamins, and antioxidants. A common base for many processed food ingredients.",
+    maize: "Another name for corn — a gluten-free grain rich in fibre, B vitamins, and antioxidants.",
+    oats: "A whole grain rich in beta-glucan (a soluble fibre that lowers LDL cholesterol), iron, and B vitamins. Naturally gluten-free but often contaminated during processing.",
+    barley: "A whole grain high in soluble fibre (beta-glucan) which supports heart health. Contains gluten — not suitable for coeliac disease.",
+    rye: "A whole grain with more fibre than wheat, often used in bread. Contains gluten. Rye bread typically has a lower glycaemic index than white bread.",
+    quinoa: "A complete plant protein (all 9 essential amino acids) and naturally gluten-free. Rich in fibre, iron, and magnesium.",
+    lentils: "Legumes high in plant protein (~9g per 100g cooked), fibre, iron, and folate. Excellent for heart health and blood sugar control.",
+    chickpeas: "Legumes rich in plant protein, fibre, iron, and folate. Help with blood sugar control due to high fibre content. Naturally gluten-free.",
+    beans: "Legumes high in plant protein, fibre, iron, and folate. One of the best foods for gut health.",
+    peas: "Legumes rich in plant protein, fibre, vitamin C, and vitamin K. Pea protein is a common dairy-free alternative.",
+    soybean: "A complete plant protein with all essential amino acids. Rich in isoflavones. One of the top 14 allergens.",
+    soybeans: "Complete plant proteins with all essential amino acids. Rich in isoflavones. One of the top 14 allergens.",
+    almond: "A tree nut rich in vitamin E, magnesium, and healthy monounsaturated fats. A major allergen — avoid if allergic to tree nuts.",
+    almonds: "Tree nuts rich in vitamin E, magnesium, and healthy monounsaturated fats. A major allergen.",
+    peanut: "A legume (not a true nut) high in protein, healthy fats, and niacin. One of the most common food allergens — reactions can be severe.",
+    peanuts: "Legumes (not true nuts) high in protein, healthy fats, and niacin. One of the most common food allergens.",
+    walnut: "A tree nut uniquely high in omega-3 fatty acids (ALA). Also rich in antioxidants. A major allergen.",
+    walnuts: "Tree nuts uniquely high in omega-3 fatty acids (ALA). Rich in antioxidants. A major allergen.",
+    cashew: "A tree nut lower in fat than most nuts, with good iron and zinc content. A major allergen.",
+    cashews: "Tree nuts lower in fat than most nuts, with good iron and zinc. A major allergen.",
+    hazelnut: "A tree nut rich in vitamin E and healthy fats. Common in chocolate spreads and confectionery. A major allergen.",
+    hazelnuts: "Tree nuts rich in vitamin E and healthy fats. Common in chocolate spreads. A major allergen.",
+    coconut: "A tropical fruit high in saturated fat (mainly lauric acid). Coconut oil has ~82% saturated fat — higher than butter.",
+    avocado: "A fruit rich in heart-healthy monounsaturated fats, potassium, and fibre. High in calories (~160 per fruit) but very nutritious.",
+    banana: "A fruit rich in potassium (~360mg per medium banana), vitamin B6, and natural sugars. Provides quick energy.",
+    apple: "A fruit rich in fibre (pectin) and vitamin C. The skin has most of the fibre and antioxidants. Low in calories (~52 per 100g).",
+    apples: "Fruits rich in fibre (pectin) and vitamin C. The skin has most of the fibre and antioxidants.",
+    orange: "A citrus fruit rich in vitamin C (~53mg per 100g) and flavonoids. The whole fruit provides fibre that juice does not.",
+    oranges: "Citrus fruits rich in vitamin C and flavonoids. Whole oranges provide fibre that juice does not.",
+    lemon: "A citrus fruit rich in vitamin C and citric acid. Used for flavour and as a natural preservative.",
+    lime: "A citrus fruit similar to lemon, rich in vitamin C. Used for flavour and acidity.",
+    mango: "A tropical fruit high in vitamin C, vitamin A (beta-carotene), and natural sugars. Higher in sugar than many fruits.",
+    strawberry: "A berry rich in vitamin C, manganese, and antioxidants. Low in calories (~33 per 100g).",
+    blueberry: "A berry exceptionally high in antioxidants, vitamin C, and vitamin K. Often called a superfood for antioxidant content.",
+    raspberry: "A berry high in fibre (~7g per 100g), vitamin C, and antioxidants. One of the highest-fibre fruits.",
+    grape: "A fruit used fresh, dried (raisins), or as juice/wine. Contains resveratrol (an antioxidant). Relatively high in natural sugars.",
+    grapes: "Fruits used fresh, dried, or as juice/wine. Contain resveratrol. Relatively high in natural sugars.",
+    cranberry: "A berry rich in antioxidants that may help prevent urinary tract infections. Often heavily sweetened in processed forms.",
+    carrot: "A root vegetable exceptionally high in beta-carotene (converts to vitamin A). Good for eye health. Naturally sweet.",
+    carrots: "Root vegetables exceptionally high in beta-carotene (converts to vitamin A). Good for eye health.",
+    celery: "A low-calorie vegetable (~16 cal/100g) with some potassium and vitamin K. Mostly water.",
+    spinach: "A leafy green very high in vitamin K, vitamin A, iron, and folate. Iron is less well absorbed than from meat due to oxalates.",
+    broccoli: "A cruciferous vegetable rich in vitamin C, vitamin K, folate, and sulforaphane (studied for anti-cancer properties).",
+    cauliflower: "A cruciferous vegetable low in calories, high in vitamin C and fibre. Popular as a low-carb substitute.",
+    cabbage: "A cruciferous vegetable high in vitamin C and K. Fermented cabbage (sauerkraut, kimchi) provides probiotics.",
+    lettuce: "A leafy green very low in calories (~15/100g). Romaine has more nutrients than iceberg.",
+    cucumber: "A very low-calorie vegetable (~16/100g), mostly water. Provides some vitamin K. Hydrating.",
+    pepper: "A vegetable rich in vitamin C (red peppers have more than oranges), vitamin A, and antioxidants.",
+    peppers: "Vegetables rich in vitamin C (red peppers have more than oranges), vitamin A, and antioxidants.",
+    mushroom: "A fungus low in calories, rich in B vitamins and selenium. Some varieties contain beta-glucans that may support immunity.",
+    mushrooms: "Fungi low in calories, rich in B vitamins and selenium. Some varieties may support immune function.",
+    ginger: "A root with anti-inflammatory and anti-nausea properties. Contains gingerols (bioactive compounds).",
+    turmeric: "A spice containing curcumin, with anti-inflammatory and antioxidant properties. Absorption improves with black pepper and fat.",
+    cinnamon: "A spice that may help lower blood sugar and has antioxidant properties. Safe at food levels.",
+    paprika: "A spice from dried peppers, rich in vitamin A and antioxidants. Adds colour and mild flavour.",
+    oregano: "An herb rich in antioxidants. Used for flavour in Mediterranean cooking. Safe at food levels.",
+    basil: "An herb with antioxidant and anti-inflammatory properties. Used for flavour. Safe in food amounts.",
+    parsley: "An herb rich in vitamin K, vitamin C, and vitamin A. Safe at food levels.",
+    thyme: "An herb with antimicrobial properties (thymol). Rich in vitamin C and manganese. Safe at food levels.",
+    rosemary: "An herb with antioxidant properties. Used for flavour, especially with meats. Safe at food levels.",
+    mint: "An herb that aids digestion and adds a cooling flavour (menthol).",
+    vanilla: "A spice from orchid pods. Natural vanilla is expensive — most products use synthetic vanillin instead.",
+    honey: "A natural sweetener with small amounts of antioxidants. Still counts as added sugar — about 80% sugar by weight.",
+    maple: "A natural sweetener from maple tree sap. Contains manganese and zinc. Still counts as added sugar.",
+    vinegar: "A fermented liquid (acetic acid) for flavour and preservation. Apple cider vinegar may help with blood sugar control.",
+    mustard: "A condiment from mustard seeds, low in calories. Contains selenium and omega-3s. A top-14 allergen.",
+    tofu: "A soy product high in plant protein (~8g/100g), calcium (if set with calcium sulfate), and iron. Avoid if allergic to soy.",
+    olive: "Rich in heart-healthy monounsaturated fats and antioxidants. Extra virgin olive oil is one of the healthiest fats.",
+    olives: "Rich in heart-healthy monounsaturated fats and antioxidants.",
+    butter: "A dairy fat (~80% fat) high in saturated fat. Contains vitamins A, D, E, K.",
+    cheese: "A dairy product high in calcium, protein, and saturated fat. Contains sodium. Aged cheeses are lower in lactose.",
+    yogurt: "A fermented dairy product rich in protein, calcium, and probiotics. Choose plain — flavoured yogurt often has high added sugar.",
+    whey: "A dairy protein rich in essential amino acids and leucine (supports muscle). Common allergen for people with dairy allergy.",
+    cream: "A high-fat dairy product (18–48% fat). Adds richness. High in saturated fat — fine in moderation.",
+    milk: "Provides protein (~3.4g/100ml), calcium (~120mg/100ml), and vitamins B12 and D. Avoid if dairy-allergic or lactose-intolerant.",
+    gelatin: "A protein from animal collagen (pig or cow). Used as a gelling agent. Not suitable for vegetarians/vegans.",
+    gelatine: "A protein from animal collagen (pig or cow). Used as a gelling agent. Not suitable for vegetarians/vegans.",
+    cocoa: "From cacao beans — contains flavanols (antioxidants), caffeine, and theobromine. Dark chocolate (70%+) has more benefits.",
+    chocolate: "Made from cocoa, sugar, and fat. Dark chocolate has more antioxidants. Milk chocolate is higher in sugar.",
+    coffee: "Contains caffeine, antioxidants, and chlorogenic acids. Moderate intake (3–4 cups/day) is linked to health benefits.",
+    tea: "Contains caffeine (less than coffee), polyphenol antioxidants, and L-theanine. Green tea has more catechins than black.",
+    "pea protein": "A plant protein from yellow split peas. A complete protein with all essential amino acids. Common dairy-free alternative.",
+    "coconut oil": "Very high in saturated fat (~82%). Used for texture and flavour. Less heart-healthy than olive or canola oil.",
+    "olive oil": "One of the healthiest cooking fats — high in monounsaturated fats and antioxidants. Supports heart health.",
+    "sunflower oil": "High in polyunsaturated fats (omega-6). Neutral flavour. Most Western diets already have too much omega-6.",
+    "palm oil": "High in saturated fat (~50%). Better than trans fats but less healthy than olive or canola oil. Environmental concerns with sourcing.",
+    "canola oil": "Low in saturated fat (~7%), high in monounsaturated fats and omega-3s. Considered one of the healthier cooking oils.",
+    "rapeseed oil": "Same as canola oil — low in saturated fat, high in monounsaturated fats and omega-3s.",
+    "soybean oil": "High in polyunsaturated fats. A common cooking oil. Generally safe even for people with soy allergy (protein is removed).",
+    "corn oil": "High in polyunsaturated fats (omega-6). Neutral flavour. A common cooking oil.",
+    "sesame oil": "Rich in antioxidants and polyunsaturated fats. Sesame is a top-14 allergen.",
+    "cocoa butter": "The fat from cocoa beans — gives chocolate its smooth texture. High in saturated fat but fine in normal chocolate amounts.",
+    "shea butter": "A plant fat used in confectionery as a cocoa butter equivalent. Generally safe at food levels.",
+  };
+
+  // Check the food lookup (try exact, singular, plural)
+  const foodInfo = FOODS[t] ?? FOODS[t.replace(/e?s$/, "")] ?? FOODS[t + "s"];
+  if (foodInfo) return foodInfo;
+
+  // E-number
+  if (/^e\s?\d{3,4}[a-z]?$/.test(t.replace(/\s/g, "")))
+    return "An E-number additive approved in the EU. The number tells you the type: 1xx = colours, 2xx = preservatives, 3xx = antioxidants, 4xx = thickeners, 6xx = flavour enhancers. Regulated and considered safe.";
+
+  // Additives and functional ingredients (pattern-based)
+  if (/dextrose/.test(t)) return "Pure glucose from corn/wheat starch. Raises blood sugar faster than table sugar. Counts toward total sugars on the label.";
+  if (/maltodextrin/.test(t)) return "A processed carb from starch with a very high glycaemic index (higher than sugar). Used as a filler/thickener. Low nutritional value.";
+  if (/fructose/.test(t)) return "A sugar processed mainly by the liver. Added fructose usually comes from corn syrup. High intake is linked to fatty liver and raised triglycerides.";
+  if (/xanthan/.test(t)) return "A thickener from fermenting sugar with bacteria. Widely used in gluten-free products. Acts as soluble fibre. Generally safe.";
+  if (/pectin/.test(t)) return "A natural fibre from fruit skins, used as a gelling agent. A soluble fibre that can lower LDL cholesterol. Very safe.";
+  if (/carrageenan/.test(t)) return "A thickener from red seaweed. Generally safe, but some research suggests it may cause gut inflammation in sensitive people, especially with IBS.";
+  if (/(nitrate|nitrite)/.test(t)) return "Preservatives in cured meats. Prevent bacteria but can form potentially carcinogenic nitrosamines when cooked at high heat.";
+  if (/(msg|monosodium glutamate)/.test(t)) return "A flavour enhancer adding savoury umami taste. Occurs naturally in tomatoes and parmesan. The headache claim isn't supported by controlled studies.";
+  if (/acid/.test(t) || t.endsWith(" acid")) return "An acid for tartness, pH control, and preservation. Common types: citric (from citrus), lactic (from fermentation). Safe at food levels.";
+  if (/(flavou?r)/.test(t) && !/(colour|color)/.test(t)) return "A flavouring to create or enhance taste. Can be natural (from food) or artificial (lab-made). Both are regulated and safe. 'Natural' just means the source was biological.";
+  if (/(colour|color)/.test(t)) return "A colouring agent for appearance. Can be natural (beetroot, turmeric) or synthetic. Some artificial colours are linked to hyperactivity in sensitive children.";
+  if (/sugar/.test(t)) return "A sweetener counting as added sugar. WHO recommends under 25g added sugar/day. High intake is linked to tooth decay, blood sugar spikes, and weight gain.";
+  if (/sweetener/.test(t)) return "A low/zero-calorie sugar substitute. Common types: stevia (natural), aspartame, sucralose (artificial). Don't spike blood sugar. Sugar alcohols can cause bloating at high amounts.";
+  if (/syrup/.test(t)) return "A liquid sugar, often from corn, rice, or glucose. Adds sweetness and moisture. High-fructose corn syrup is linked to metabolic issues in large amounts.";
+  if (/(salt|sodium)/.test(t)) return "Sodium for flavour and preservation. Daily limit: under 2,300mg. High intake raises blood pressure and cardiovascular risk.";
+  if (/(oil|fat)/.test(t)) return "A fat for richness and texture. Unsaturated fats (olive, canola) are heart-healthier than saturated (palm, coconut). Trans fats are banned in most places.";
+  if (/(starch|flour)/.test(t)) return "A carb for thickening or structure. Sources: wheat (has gluten), corn, potato, rice. Avoid wheat-based if you have coeliac disease.";
+  if (/preservative/.test(t)) return "Slows spoilage from bacteria, mould, or oxidation. Common ones: sodium benzoate, sorbic acid, nitrates. Some people are sensitive to certain types.";
+  if (/antioxidant/.test(t)) return "Prevents fats from going rancid. Examples: vitamin E, vitamin C. Generally safe and some have nutritional benefits.";
+  if (/emulsifier/.test(t)) return "Keeps oil and water mixed so the product doesn't separate. Common types: lecithin (soy/sunflower), mono- and diglycerides. Generally safe.";
+  if (/(stabilis|stabiliz)/.test(t)) return "Maintains texture and prevents separation. Common types: xanthan gum, carrageenan, pectin. Generally safe at food levels.";
+  if (/gum/.test(t)) return "A plant-derived thickener for smooth texture. Types: xanthan, guar, locust bean gum. Some act as soluble fibre. Generally safe.";
+  if (/protein/.test(t)) return "Protein for nutrition or texture. Source matters for allergies — common: whey (dairy), soy, pea, egg. Check the label if you have allergies.";
+  if (/extract/.test(t)) return "A concentrated form of flavour or nutrients from a natural source. Generally safe. Yeast extract contains glutamates (natural umami).";
+  if (/(juice|fruit)/.test(t)) return "Juice or fruit for flavour, sweetness, or colour. Even natural juice counts as sugar — check total sugar per serving.";
+  if (/phosphate/.test(t)) return "A phosphate salt for acidity, texture, or moisture. High intake from processed foods has been linked to kidney strain.";
+  if (/carbonate/.test(t)) return "A carbonate salt for leavening (makes things rise) or pH control. Baking soda is the most common. Safe at food levels.";
+  if (/(cream|milk|dairy)/.test(t)) return "A dairy ingredient with fat, protein, and calcium. Contains lactose and casein/whey (allergens). Avoid if dairy-allergic or lactose-intolerant.";
+  if (/niacin|vitamin.?b3/.test(t)) return "Niacin (vitamin B3) helps convert food to energy and supports skin, nerves, and digestion. Daily need: 14–16mg. Safe at food levels.";
+  if (/riboflavin|vitamin.?b2/.test(t)) return "Riboflavin (vitamin B2) produces energy and supports skin and eyes. Daily need: 1.1–1.3mg. Harmlessly turns urine bright yellow.";
+  if (/thiamin|vitamin.?b1/.test(t)) return "Thiamin (vitamin B1) converts carbs to energy and supports nerves. Daily need: 1.1–1.2mg. Safe at food levels.";
+  if (/folic.?acid|folate|vitamin.?b9/.test(t)) return "Folic acid (vitamin B9) is essential for DNA synthesis. Critical during pregnancy. Daily need: 400mcg (600mcg when pregnant).";
+  if (/vitamin.?b12/.test(t)) return "Vitamin B12 supports nerves and red blood cells. Found almost only in animal products — critical for vegans. Daily need: 2.4mcg.";
+  if (/vitamin.?d/.test(t)) return "Vitamin D helps absorb calcium for bone health and immunity. Deficiency is very common. Daily need: 600–800 IU.";
+  if (/vitamin.?c|ascorbic/.test(t)) return "Vitamin C supports immunity, collagen, and iron absorption. Daily need: 75–90mg. Also used as a natural preservative.";
+  if (/vitamin/.test(t)) return "A vitamin added to fortify this product. Safe at food levels. Check the label for % of daily recommended intake.";
+  if (/iron/.test(t) && !/environ/.test(t)) return "Iron carries oxygen in blood and supports energy. Daily need: 8mg (men) / 18mg (women). Deficiency causes fatigue and anaemia.";
+  if (/zinc/.test(t)) return "Zinc supports immunity, wound healing, and taste. Daily need: 8–11mg. Deficiency impairs immune function.";
+  if (/calcium/.test(t)) return "Calcium is essential for bones, teeth, muscles, and nerves. Daily need: 1,000–1,200mg. Most people don't get enough.";
+  if (/magnesium/.test(t)) return "Magnesium supports 300+ enzyme reactions including energy, muscles, and blood sugar. Daily need: 310–420mg. Many people fall short.";
+  if (/potassium/.test(t) && !/potassium sorbate|potassium phosphate|potassium carbonate/.test(t)) return "Potassium regulates fluids, muscles, and nerves. Helps counteract sodium's blood pressure effect. Daily need: 2,600–3,400mg.";
+  if (/mineral/.test(t)) return "A mineral for nutritional fortification: iron (oxygen transport), calcium (bones), zinc (immunity), magnesium (energy). Safe at food levels.";
+  if (/lecithin/.test(t)) return "A natural emulsifier keeping fat and water mixed. Usually from soy or sunflower. Check the source if you have a soy allergy.";
+  if (/soy/.test(t)) return "A top-14 allergen used as protein, oil, lecithin, or flour. A complete plant protein. Soy oil is usually safe even for soy-allergic people.";
+  if (/(fibe?r)/.test(t)) return "Dietary fibre for digestive health. Soluble fibre feeds gut bacteria and can lower cholesterol. Most adults need 25–30g/day.";
+  if (/(cocoa|chocolate)/.test(t)) return "From cacao beans — contains flavanols (antioxidants), caffeine, and theobromine. Dark chocolate (70%+) has more benefits and less sugar.";
+  if (/coffee/.test(t)) return "Contains caffeine, antioxidants, and chlorogenic acids. Moderate intake (3–4 cups/day) is linked to health benefits. Limit if pregnant.";
+  if (/tea/.test(t)) return "Contains caffeine (less than coffee), polyphenol antioxidants, and L-theanine. Green tea has more catechins than black.";
+
+  // Suffix-based heuristics for unknown chemical names
+  if (/ose$/.test(t)) return `${display} — the "-ose" ending means this is a type of sugar. It counts toward total sugars and raises blood sugar. People with diabetes should account for it.`;
+  if (/ate$/.test(t)) return `${display} is a salt or mineral compound, typically used as a preservative, acidity regulator, or nutrient. Generally safe at permitted food levels.`;
+  if (/ite$/.test(t)) return `${display} is a preservative or antioxidant used to extend shelf life. Check if you have sulphite sensitivity (can trigger asthma in some people).`;
+  if (/ase$/.test(t)) return `${display} is an enzyme (the "-ase" ending). Enzymes speed up reactions in food processing — e.g. breaking down starches or proteins. Used in tiny amounts. Safe.`;
+  if (/ol$/.test(t) && t.length > 3) return `${display} is likely a sugar alcohol (polyol) — a low-calorie sweetener. Less impact on blood sugar than sugar, but high amounts can cause bloating or loose stools.`;
+  if (/ide$/.test(t)) return `${display} is a chemical compound. Common food examples: sodium chloride (salt), carbon dioxide (fizz). The specific compound determines its role.`;
+
+  // Category heuristics
+  if (/(spice|herb|season|powder|seed|leaf|leaves|root|bark|peel|zest|dried|ground|crushed)/.test(t))
+    return `${display} is a natural flavouring — a spice, herb, or plant extract for taste and aroma. Generally safe with antioxidant properties. Used in small amounts.`;
+  if (/(vinegar|ferment|culture|yeast|sourdough)/.test(t))
+    return `${display} is a fermented ingredient for flavour, preservation, or texture. Fermented foods can contain beneficial bacteria, though heat processing reduces live cultures.`;
+  if (/(nut|almond|cashew|walnut|peanut|hazelnut|sesame|pistachio|pecan|macadamia)/.test(t))
+    return `${display} is a nut — rich in healthy fats, protein, and fibre. Nuts are major allergens. Always check the allergen statement if you have a nut allergy.`;
+  if (/(lentil|chickpea|bean|pea|legume|pulse|dal|edamame)/.test(t))
+    return `${display} is a legume — high in plant protein, fibre, iron, and folate. Great for heart health and blood sugar. Naturally gluten-free.`;
+  if (/(wheat|oat|rice|barley|rye|corn|maize|quinoa|millet|buckwheat|grain|cereal)/.test(t))
+    return `${display} is a grain or cereal providing carbs and, in whole form, fibre and B vitamins. Wheat, barley, and rye contain gluten.`;
+
+  // Universal fallback — uses product context to give useful position info
+  let positionInfo = "";
+  if (product) {
+    const ingText = normalize(product.ingredients_text_en ?? product.ingredients_text ?? "");
+    const idx = ingText.indexOf(t);
+    if (idx >= 0) {
+      const before = ingText.substring(0, idx);
+      const commasBefore = (before.match(/,/g) ?? []).length;
+      const totalCommas = (ingText.match(/,/g) ?? []).length;
+      if (totalCommas > 0) {
+        const position = commasBefore + 1;
+        const total = totalCommas + 1;
+        const pct = Math.round((position / total) * 100);
+        if (pct <= 20) positionInfo = " It appears near the top of the ingredient list, meaning this product contains a relatively large amount of it.";
+        else if (pct <= 50) positionInfo = " It's in the middle of the ingredient list, so it's a moderate component.";
+        else positionInfo = " It's toward the end of the ingredient list, meaning only a small amount is used.";
+      }
+    }
   }
 
-  // Pattern-based short explanations
-  if (/\bacid\b/.test(t) || t.endsWith(" acid")) return "An acid used for flavour or as a preservative. Common in drinks and processed foods; generally safe at normal levels.";
-  if (/\b(flavour|flavor)\b/.test(t)) return "A flavouring added to give a specific taste. Can be natural or synthetic; permitted flavourings are considered safe.";
-  if (/\b(colour|color)\b/.test(t)) return "A colouring added to give the product its appearance. Permitted colours are regulated and generally safe at allowed levels.";
-  if (/\b(sugar|sweetener|syrup)\b/.test(t)) return "A sweetening ingredient. Check the amount per serving if you are limiting sugar or managing blood sugar.";
-  if (/\b(salt|sodium)\b/.test(t)) return "Adds flavour and can act as a preservative. Worth watching if you are limiting sodium.";
-  if (/\b(oil|fat|butter)\b/.test(t)) return "A fat or oil used for texture, flavour, or cooking. Type and amount matter for nutrition.";
-  if (/\b(starch|flour)\b/.test(t)) return "A carbohydrate used for texture or structure. Often from wheat, corn, or other grains; check if you avoid gluten.";
-  if (/\b(preservative|antioxidant)\b/.test(t)) return "Helps keep the product from spoiling. Permitted preservatives are used in small, regulated amounts.";
-  if (/\b(emulsifier|stabiliser|stabilizer)\b/.test(t)) return "Helps mix or stabilize ingredients (e.g. oil and water). Common in processed foods; generally safe.";
-  if (/\bgum\b/.test(t) || t.endsWith(" gum")) return "A gelling or thickening agent used for texture. Common in drinks, jams, and dairy products; generally safe at normal levels.";
-  if (/\bwater\b/.test(t)) return "Water is used as a base or to adjust texture. In carbonated form it adds fizz.";
-  if (/\b(protein|extract)\b/.test(t)) return "Adds protein or flavour. Source may matter for allergies (e.g. soy, milk).";
-  if (/\b(juice|fruit)\b/.test(t)) return "Fruit juice is juice from fruit, often used for flavour or sweetness. In ingredients, “fruit juice” can be from concentrate; check the label for added sugar or whether it’s 100% juice.";
-  if (/\bphosphate\b/.test(t)) return "A mineral salt used to regulate acidity, improve texture, or bind water. Common in beverages and processed foods; generally safe at permitted levels.";
-  if (/\bcarbonate\b/.test(t)) return "A mineral salt used as a pH regulator or leavening agent. Generally safe at food-use levels.";
-  if (/\b(cream|milk|dairy)\b/.test(t)) return "A dairy ingredient that adds texture and flavour. Check the label if you avoid dairy or have an allergy.";
-  if (/\b(coffee|tea)\b/.test(t)) return "Provides flavour and often caffeine. Check the label for caffeine content if you’re limiting it.";
-  if (/\b(vitamin|mineral)\b/.test(t)) return "Added for nutrition or fortification. Amounts are usually on the label.";
-  if (/\b(natural|nature)\b/.test(t)) return "Often refers to flavour or source. “Natural” on labels usually means derived from natural sources; check the full ingredients for details.";
-  if (/\b(lecithin|soy)\b/.test(t)) return "Often used as an emulsifier. Source may be soy or other plants; check the label if you have allergies.";
-  if (/\b(fiber|fibre)\b/.test(t)) return "Dietary fibre from plants; helps digestion and can help you feel full. Check the label for grams per serving.";
-  if (/\b(cocoa|chocolate)\b/.test(t)) return "From cocoa beans; adds flavour and can contain caffeine. Dark chocolate often has less sugar than milk chocolate.";
-
-  // Catch-all: every ingredient gets at least a short answer (no more "AI explanation isn't available").
-  return "It's an ingredient in this product, often used for texture, flavour, or preservation. Check the label for details, or ask about the score, allergens, or a healthier alternative.";
+  return `${display} is a food ingredient used in this product.${positionInfo} It's a recognised ingredient considered safe for consumption.`;
 }
 
 export async function answerFoodQuestion(args: {

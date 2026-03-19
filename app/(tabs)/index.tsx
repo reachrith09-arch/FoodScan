@@ -14,7 +14,7 @@ import {
   View,
 } from "react-native";
 import { useColorScheme as useNativeWindScheme } from "nativewind";
-import { Camera, ChevronDown, List, PenLine, ScanBarcode } from "lucide-react-native";
+import { Camera, ChevronDown, Crown, List, PenLine, ScanBarcode } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button.native";
@@ -25,6 +25,7 @@ import { useOnboarding } from "@/lib/use-settings";
 import { OnboardingChecklist } from "@/components/onboarding-checklist";
 import { getProductByBarcode } from "@/lib/open-food-facts";
 import { analyzeProduct } from "@/lib/scoring";
+import { useSubscription, FREE_DAILY_SCANS } from "@/lib/revenuecat";
 import type { ScanResult } from "@/types/food";
 
 const HEADER_HIDE_OFFSET = 140;
@@ -95,6 +96,7 @@ export default function ScanScreen() {
   const headerY = React.useRef(new Animated.Value(0)).current;
   const lastScrollY = React.useRef(0);
   const headerVisible = React.useRef(true);
+  const { canScan, freeScansRemaining, isPro, recordScan, showPaywall, refresh: refreshSub } = useSubscription();
 
   React.useEffect(() => {
     getSettings().then((s) => {
@@ -152,7 +154,8 @@ export default function ScanScreen() {
     React.useCallback(() => {
       load();
       refreshOnboarding();
-    }, [load, refreshOnboarding]),
+      refreshSub();
+    }, [load, refreshOnboarding, refreshSub]),
   );
 
   const searchOptions = [
@@ -162,13 +165,28 @@ export default function ScanScreen() {
     { label: "Search for foods", href: "/search" as const, icon: List },
   ] as const;
 
-  const onSearchOption = (href: string) => {
+  const onSearchOption = async (href: string) => {
+    if (href === "/search") {
+      setSearchDropdownOpen(false);
+      router.push(href);
+      return;
+    }
+    const allowed = await recordScan();
+    if (!allowed) {
+      await showPaywall();
+      return;
+    }
     setSearchDropdownOpen(false);
     router.push(href as "/scanner" | "/photo" | "/label" | "/search");
   };
 
   const analyzeBarcode = async (barcode: string) => {
     if (busy) return;
+    const allowed = await recordScan();
+    if (!allowed) {
+      await showPaywall();
+      return;
+    }
     setBusy(true);
     setBusyLabel("Analyzing product…");
     try {
@@ -264,6 +282,36 @@ export default function ScanScreen() {
           >
             Scan barcodes for health insights, ingredients, and recommendations.
           </Text>
+
+          {!isPro && (
+            <Pressable
+              onPress={() => showPaywall()}
+              style={{
+                marginTop: 16,
+                flexDirection: "row",
+                alignItems: "center",
+                alignSelf: "center",
+                gap: 6,
+                backgroundColor: freeScansRemaining <= 1 ? "rgba(239,68,68,0.1)" : "rgba(34,197,94,0.1)",
+                paddingHorizontal: 14,
+                paddingVertical: 8,
+                borderRadius: 20,
+                borderWidth: 1,
+                borderColor: freeScansRemaining <= 1 ? "rgba(239,68,68,0.3)" : "rgba(34,197,94,0.3)",
+              }}
+            >
+              <Crown size={14} color={freeScansRemaining <= 1 ? "#ef4444" : THEME.primary} />
+              <RNText
+                style={{
+                  fontSize: 13,
+                  fontWeight: "600",
+                  color: freeScansRemaining <= 1 ? "#ef4444" : THEME.primary,
+                }}
+              >
+                {freeScansRemaining}/{FREE_DAILY_SCANS} free scans left today
+              </RNText>
+            </Pressable>
+          )}
 
           <View className="mt-10 w-full" style={{ alignSelf: "stretch" }}>
             <View style={[styles.homeButtonWrapper, { borderColor: THEME.darkGrey }]}>

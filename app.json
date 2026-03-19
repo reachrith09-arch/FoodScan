@@ -42,6 +42,13 @@
     "plugins": [
       "expo-camera",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "This app uses your photos to select images of food for analysis.",
+          "cameraPermission": "This app uses the camera to take photos of food for analysis."
+        }
+      ],
+      [
         "expo-dev-client",
         {
           "launchMode": "most-recent"

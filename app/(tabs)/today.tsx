@@ -4,6 +4,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Text as RNText,
+  TouchableOpacity,
   useColorScheme,
   View,
 } from "react-native";
@@ -42,6 +43,7 @@ export default function TodayScreen() {
   const [syncing, setSyncing] = React.useState(false);
   const [profile, setProfile] = React.useState<Awaited<ReturnType<typeof getHealthProfile>>>(null);
   const [recentScanId, setRecentScanId] = React.useState<string | null>(null);
+  const [additivesOpen, setAdditivesOpen] = React.useState(false);
 
   const setBarVisible = React.useCallback(
     (visible: boolean) => {
@@ -145,39 +147,34 @@ export default function TodayScreen() {
         <CardContent className="gap-2">
           {today ? (
             <>
-              <View className="flex-row flex-wrap gap-4">
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
                 {[
                   { label: "Scans", value: today.scansCount },
                   { label: "Sodium (mg)", value: Math.round(today.sodiumMgTotal) },
                   { label: "Sugar (g)", value: Math.round(Number(today.sugarGTotal) || 0) },
                   { label: "Calories (kcal)", value: Math.round(today.caloriesKcalTotal) },
+                  { label: "Avg score", value: weekly?.avgOverallScore ?? "–" },
+                  { label: "Avg UPF", value: weekly?.avgUltraProcessed ?? "–" },
                 ].map((s) => (
                   <View
                     key={s.label}
-                    className="rounded-xl p-3"
                     style={{
+                      width: "31%",
+                      flexGrow: 0,
+                      flexShrink: 0,
                       borderWidth: 1,
                       borderLeftWidth: 3,
+                      borderRadius: 12,
+                      padding: 12,
                       borderColor: isDark ? "#333" : THEME.borderLight,
                       borderLeftColor: THEME.primary,
                       backgroundColor: isDark ? "#1a1a1a" : "rgba(34,197,94,0.06)",
-                      shadowColor: "#000",
-                      shadowOffset: { width: 0, height: 1 },
-                      shadowOpacity: isDark ? 0.1 : 0.03,
-                      shadowRadius: 4,
-                      elevation: 2,
                     }}
                   >
                     <Text className="text-xs text-muted-foreground" style={textMuted}>{s.label}</Text>
                     <Text className="text-xl font-semibold text-foreground" style={textWhite}>{s.value}</Text>
                   </View>
                 ))}
-              </View>
-              <View className="mt-2 rounded-lg border border-border bg-muted/30 p-3">
-                <Text className="text-xs text-muted-foreground" style={textMuted}>Ultra-processed exposure (avg)</Text>
-                <Text className="text-xl font-semibold text-foreground" style={textWhite}>
-                  {Math.round(today.ultraProcessedScoreAvg)} / 100
-                </Text>
               </View>
               {profile?.nutrientGoals && (profile.nutrientGoals.sodiumMgMax != null || profile.nutrientGoals.sugarGMax != null || profile.nutrientGoals.caloriesKcalMax != null) && (
                 <View className="mt-2 rounded-lg border border-border bg-muted/20 p-3">
@@ -258,14 +255,20 @@ export default function TodayScreen() {
           </CardHeader>
           {recentScanId && (
             <CardContent className="pt-0">
-              <Button
-                variant="outline"
-                size="sm"
+              <TouchableOpacity
+                activeOpacity={0.7}
                 onPress={() => router.push(`/results/${recentScanId}`)}
-                style={isDark ? { borderColor: "#525252" } : undefined}
+                style={{
+                  borderWidth: 2,
+                  borderColor: THEME.primary,
+                  borderRadius: 10,
+                  paddingVertical: 10,
+                  paddingHorizontal: 16,
+                  alignItems: "center",
+                }}
               >
-                <Text className="text-foreground" style={textWhite}>Open last scan → swaps</Text>
-              </Button>
+                <Text style={{ color: isDark ? "#fff" : "#111", fontWeight: "600", fontSize: 14 }}>Open last scan → swaps</Text>
+              </TouchableOpacity>
             </CardContent>
           )}
         </Card>
@@ -291,40 +294,54 @@ export default function TodayScreen() {
 
       {weekly && weekly.topAdditives.length > 0 && (
         <Card>
-          <CardHeader>
-            <CardTitle style={textWhite}>Top additives this week</CardTitle>
-          </CardHeader>
-          <CardContent className="gap-2">
-            {weekly.topAdditives.map((a) => (
-              <View key={a.key} className="flex-row items-center justify-between rounded-lg border border-border bg-muted/30 p-3">
-                <Text className="text-foreground" style={textWhite}>{a.key}</Text>
-                <Text className="text-sm text-muted-foreground" style={textMuted}>{a.count}</Text>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => setAdditivesOpen((v) => !v)}
+          >
+            <CardHeader>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                <CardTitle style={textWhite}>Top additives this week</CardTitle>
+                <Text style={{ fontSize: 16, color: isDark ? "#a1a1aa" : "#6b7280" }}>
+                  {additivesOpen ? "▲" : "▼"}
+                </Text>
               </View>
-            ))}
-          </CardContent>
+            </CardHeader>
+          </TouchableOpacity>
+          {additivesOpen && (
+            <CardContent className="gap-2">
+              {weekly.topAdditives.map((a) => (
+                <View key={a.key} className="flex-row items-center justify-between rounded-lg border border-border bg-muted/30 p-3">
+                  <Text className="text-foreground" style={textWhite}>{a.key}</Text>
+                  <Text className="text-sm text-muted-foreground" style={textMuted}>{a.count}</Text>
+                </View>
+              ))}
+            </CardContent>
+          )}
         </Card>
       )}
 
       {hints.length > 0 && (
-        <Card className="mt-3">
-          <CardHeader>
-            <CardTitle style={textWhite}>Pattern hints (early learning)</CardTitle>
-            <Text className="text-sm text-muted-foreground" style={textMuted}>
-              Based on your reaction logs. Not proof—use as a clue.
-            </Text>
-          </CardHeader>
-          <CardContent className="gap-2">
-            {hints.map((h, i) => (
-              <View key={`${h.label}-${i}`} className="rounded-lg border border-border bg-muted/30 p-3">
-                <View className="flex-row items-center justify-between">
-                  <Text className="font-medium text-foreground" style={textWhite}>{h.label}</Text>
-                  <Text className="text-xs text-muted-foreground" style={textMuted}>{h.count}</Text>
-                </View>
-                <Text className="mt-1 text-sm text-muted-foreground" style={textMuted}>{h.details}</Text>
-              </View>
-            ))}
-          </CardContent>
-        </Card>
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={() => router.push("/pattern-hints")}
+          className="mt-3"
+          style={{
+            borderWidth: 1,
+            borderLeftWidth: 3,
+            borderColor: isDark ? "#333" : THEME.borderLight,
+            borderLeftColor: THEME.primary,
+            borderRadius: 12,
+            padding: 14,
+            backgroundColor: isDark ? "#1a1a1a" : "rgba(34,197,94,0.06)",
+          }}
+        >
+          <Text style={{ fontSize: 14, fontWeight: "600", color: isDark ? "#fff" : "#111" }}>
+            Pattern hints
+          </Text>
+          <Text style={{ fontSize: 12, color: isDark ? "#a1a1aa" : "#6b7280", marginTop: 2 }}>
+            {hints.length} pattern{hints.length !== 1 ? "s" : ""} found · Tap to view →
+          </Text>
+        </TouchableOpacity>
       )}
       </View>
       </Animated.ScrollView>
