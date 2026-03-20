@@ -155,14 +155,25 @@ export function SubscriptionProvider({
       setLoading(false);
       return;
     }
+    const RC = Purchases;
+    if (RC == null) {
+      const msg =
+        "RevenueCat native module is not loaded (Purchases is null). Rebuild with pnpm ios / pnpm prebuild so react-native-purchases is linked—not Expo Go.";
+      setRevenueCatDiagnostic((d) => ({ ...d, lastInitError: msg }));
+      if (__DEV__) {
+        console.warn("[RevenueCat]", msg);
+      }
+      setLoading(false);
+      return;
+    }
     try {
-      Purchases.setLogLevel(LOG_LEVEL.DEBUG);
-      Purchases.configure({ apiKey });
-      const info = await Purchases.getCustomerInfo();
+      RC.setLogLevel(LOG_LEVEL.DEBUG);
+      RC.configure({ apiKey });
+      const info = await RC.getCustomerInfo();
       checkEntitlement(info);
       setNativeAvailable(true);
       try {
-        const offerings = await Purchases.getOfferings();
+        const offerings = await RC.getOfferings();
         if (offerings.current?.availablePackages) {
           setPackages(offerings.current.availablePackages);
         }
@@ -190,7 +201,7 @@ export function SubscriptionProvider({
 
   // Sync subscription when RevenueCat sends customer info updates (purchase elsewhere, renewal, etc.)
   React.useEffect(() => {
-    if (!nativeAvailable) return;
+    if (!nativeAvailable || Purchases == null) return;
     const listener = (info: CustomerInfo) => {
       checkEntitlement(info);
     };
@@ -201,7 +212,7 @@ export function SubscriptionProvider({
   }, [nativeAvailable, checkEntitlement]);
 
   const refresh = React.useCallback(async () => {
-    if (!nativeAvailable) return;
+    if (!nativeAvailable || Purchases == null) return;
     try {
       const info = await Purchases.getCustomerInfo();
       checkEntitlement(info);
@@ -240,7 +251,7 @@ export function SubscriptionProvider({
 
   const showPaywall = React.useCallback(
     async (options?: { forceShow?: boolean }): Promise<boolean> => {
-      if (!nativeAvailable) {
+      if (!nativeAvailable || Purchases == null) {
         Alert.alert(
           "Purchases not available",
           "In-app purchases are not available in this build. Make sure you're running a development or production build (not Expo Go) with the RevenueCat API key configured.",
@@ -265,7 +276,7 @@ export function SubscriptionProvider({
   );
 
   const restorePurchases = React.useCallback(async () => {
-    if (!nativeAvailable) return;
+    if (!nativeAvailable || Purchases == null) return;
     try {
       const info = await Purchases.restorePurchases();
       checkEntitlement(info);
@@ -276,7 +287,7 @@ export function SubscriptionProvider({
 
   const purchasePackage = React.useCallback(
     async (pkg: PurchasesPackage): Promise<boolean> => {
-      if (!nativeAvailable) return false;
+      if (!nativeAvailable || Purchases == null) return false;
       try {
         const { customerInfo } = await Purchases.purchasePackage(pkg);
         return checkEntitlement(customerInfo);
