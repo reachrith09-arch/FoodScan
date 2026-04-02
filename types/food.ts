@@ -2,7 +2,12 @@
 export type AgeRange = "under-18" | "18-30" | "31-50" | "51-64" | "65-plus";
 
 /** Activity level for context-aware advice (optional). */
-export type ActivityLevel = "sedentary" | "light" | "moderate" | "active" | "very-active";
+export type ActivityLevel =
+  | "sedentary"
+  | "light"
+  | "moderate"
+  | "active"
+  | "very-active";
 
 /** Optional daily nutrient goals (e.g. max sodium in mg). */
 export interface NutrientGoals {
@@ -61,12 +66,12 @@ export interface Nutriments {
   sugars?: number;
   sugars_serving?: number;
   "energy-kcal_100g"?: number;
-  "proteins_100g"?: number;
-  "carbohydrates_100g"?: number;
-  "fat_100g"?: number;
-  "fiber_100g"?: number;
-  "sodium_100g"?: number;
-  "sugars_100g"?: number;
+  proteins_100g?: number;
+  carbohydrates_100g?: number;
+  fat_100g?: number;
+  fiber_100g?: number;
+  sodium_100g?: number;
+  sugars_100g?: number;
 }
 
 /**
@@ -179,6 +184,13 @@ export interface ProductAnalysis {
   healthRisks: HealthRisk[];
 }
 
+/** One line from AI vision + user edits on the photo scan confirm step. */
+export interface MealIngredientLine {
+  name: string;
+  portion?: string;
+  confidence?: number;
+}
+
 /**
  * Saved scan/analysis result (includes product snapshot and computed risks).
  */
@@ -192,6 +204,12 @@ export interface ScanResult {
   analysis?: ProductAnalysis;
   /** Optional meal context (breakfast, lunch, etc.). */
   mealType?: MealType;
+  /** Photo / meal scan: dish title from AI (user may edit). */
+  mealDishSummary?: string;
+  /** Photo / meal scan: confirmed ingredient rows (names + portions match AI + user input). */
+  mealIngredients?: MealIngredientLine[];
+  /** Local file URI of the meal photo (may not resolve after cache clears). */
+  mealPhotoUri?: string;
 }
 
 /**

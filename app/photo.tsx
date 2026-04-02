@@ -1,4 +1,14 @@
+import { requireOptionalNativeModule } from "expo-modules-core";
 import { useRouter } from "expo-router";
+import {
+  Camera,
+  ImageIcon,
+  Plus,
+  Search,
+  Trash2,
+  UtensilsCrossed,
+  Zap,
+} from "lucide-react-native";
 import * as React from "react";
 import {
   ActivityIndicator,
@@ -9,39 +19,28 @@ import {
   useColorScheme,
   View,
 } from "react-native";
-import {
-  Camera,
-  ImageIcon,
-  Plus,
-  Search,
-  Trash2,
-  UtensilsCrossed,
-  Zap,
-} from "lucide-react-native";
-import { requireOptionalNativeModule } from "expo-modules-core";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "@/components/ui/button.native";
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
-import { addToScanHistory, getHealthProfile } from "@/lib/storage";
-import { THEME } from "@/lib/theme";
-import { searchProducts } from "@/lib/open-food-facts";
-import { lookupProductOnline } from "@/lib/lookup-product-online";
 import {
   computeMealScore,
+  defaultPortionForFood,
   getMergedMealProduct,
-  parsePortionToGrams,
   type MealItem,
+  parsePortionToGrams,
 } from "@/lib/meal-score";
 import {
-  recognizeMealFromImage,
-  confidenceLabel,
   confidenceColor,
-  ratioToPortionString,
+  confidenceLabel,
   isFoodRecognitionAvailable,
+  ratioToPortionString,
+  recognizeMealFromImage,
 } from "@/lib/recognize-food";
+import { productFromRecognizedIngredient } from "@/lib/recognized-ingredient-product";
+import { addToScanHistory, getHealthProfile } from "@/lib/storage";
+import { THEME } from "@/lib/theme";
 import { resolveBase64ForVision } from "@/lib/vision-image";
-import { defaultPortionForFood } from "@/lib/meal-score";
 import type { ScanResult } from "@/types/food";
 
 const PORTION_PLACEHOLDER = "e.g. 100g, 1 cup, 1 serving";
@@ -59,8 +58,13 @@ async function getImagePicker(): Promise<ImagePickerModule | null> {
   if (imagePickerModule !== undefined) return imagePickerModule;
   try {
     const native = requireOptionalNativeModule("ExponentImagePicker");
-    if (!native) { imagePickerModule = null; return null; }
-    imagePickerModule = (await import("expo-image-picker")) as ImagePickerModule;
+    if (!native) {
+      imagePickerModule = null;
+      return null;
+    }
+    imagePickerModule = (await import(
+      "expo-image-picker"
+    )) as ImagePickerModule;
     return imagePickerModule;
   } catch {
     imagePickerModule = null;
@@ -88,9 +92,16 @@ function ConfidenceBadge({ confidence }: { confidence: number }) {
   const color = confidenceColor(confidence);
   const label = confidenceLabel(confidence);
   return (
-    <View style={[styles.badge, { backgroundColor: color + "22", borderColor: color + "55" }]}>
+    <View
+      style={[
+        styles.badge,
+        { backgroundColor: color + "22", borderColor: color + "55" },
+      ]}
+    >
       <View style={[styles.badgeDot, { backgroundColor: color }]} />
-      <Text style={[styles.badgeText, { color }]}>{confidence}% · {label}</Text>
+      <Text style={[styles.badgeText, { color }]}>
+        {confidence}% · {label}
+      </Text>
     </View>
   );
 }
@@ -111,7 +122,9 @@ export default function PhotoScreen() {
   /** Cycles on the full-screen analyzing step so the wait feels intentional. */
   const [analyzingHintIndex, setAnalyzingHintIndex] = React.useState(0);
   /** From image picker; used when reading the file URI fails (common after crop). */
-  const [pendingPickerBase64, setPendingPickerBase64] = React.useState<string | null>(null);
+  const [pendingPickerBase64, setPendingPickerBase64] = React.useState<
+    string | null
+  >(null);
   const visionEnabled = isFoodRecognitionAvailable();
   const recognitionGen = React.useRef(0);
 
@@ -145,7 +158,11 @@ export default function PhotoScreen() {
     setLoading(true);
     setError(null);
     try {
-      const { dishSummary: summary, foods: recognized, visionError } = await recognizeMealFromImage(base64);
+      const {
+        dishSummary: summary,
+        foods: recognized,
+        visionError,
+      } = await recognizeMealFromImage(base64);
       if (!mountedRef.current || gen !== recognitionGen.current) return;
       const summaryText = summary?.trim() ?? "";
       setDishSummary(summaryText);
@@ -161,7 +178,11 @@ export default function PhotoScreen() {
           recognized.map((f, i) => ({
             id: `food-${Date.now()}-${i}`,
             name: f.name,
-            portion: ratioToPortionString(f.portionRatio, f.isDrink, totalAmount),
+            portion: ratioToPortionString(
+              f.portionRatio,
+              f.isDrink,
+              totalAmount,
+            ),
             confidence: f.confidence,
             isDrink: f.isDrink,
             isBlended: f.isBlended,
@@ -171,7 +192,9 @@ export default function PhotoScreen() {
         setStep("review");
       } else {
         setIsBlendedMeal(false);
-        setFoods([{ id: `food-${Date.now()}`, name: "", portion: "1 serving" }]);
+        setFoods([
+          { id: `food-${Date.now()}`, name: "", portion: "1 serving" },
+        ]);
         setStep("review");
         const baseMsg = summaryText
           ? "Meal name only — add ingredients below or Re-analyze."
@@ -181,12 +204,15 @@ export default function PhotoScreen() {
     } catch {
       if (mountedRef.current && gen === recognitionGen.current) {
         setDishSummary("");
-        setFoods([{ id: `food-${Date.now()}`, name: "", portion: "1 serving" }]);
+        setFoods([
+          { id: `food-${Date.now()}`, name: "", portion: "1 serving" },
+        ]);
         setStep("review");
         setError("Scan failed. Add foods manually or try Re-analyze.");
       }
     } finally {
-      if (mountedRef.current && gen === recognitionGen.current) setLoading(false);
+      if (mountedRef.current && gen === recognitionGen.current)
+        setLoading(false);
     }
   }, []);
 
@@ -194,7 +220,10 @@ export default function PhotoScreen() {
     if (!imageUri) return;
     setStep("analyzing");
     setError(null);
-    const resolved = await resolveBase64ForVision(imageUri, pendingPickerBase64);
+    const resolved = await resolveBase64ForVision(
+      imageUri,
+      pendingPickerBase64,
+    );
     if (!mountedRef.current) return;
     const b64 = resolved.ok ? resolved.base64 : null;
     setImageBase64(b64);
@@ -248,12 +277,16 @@ export default function PhotoScreen() {
     if (capturing || loading) return;
     const ImagePicker = await getImagePicker();
     if (!ImagePicker) {
-      setError("Camera is not available. Rebuild the app with expo run:ios after installing native modules.");
+      setError(
+        "Camera is not available. Rebuild the app with expo run:ios after installing native modules.",
+      );
       return;
     }
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) {
-      setError("Camera permission is required. Enable it in Settings to take photos.");
+      setError(
+        "Camera permission is required. Enable it in Settings to take photos.",
+      );
       return;
     }
     setError(null);
@@ -266,7 +299,10 @@ export default function PhotoScreen() {
       });
       if (!mountedRef.current) return;
       if (!result.canceled && result.assets[0]) {
-        handlePickedAsset(result.assets[0].uri, result.assets[0].base64 ?? null);
+        handlePickedAsset(
+          result.assets[0].uri,
+          result.assets[0].base64 ?? null,
+        );
       }
     } catch {
       if (mountedRef.current) {
@@ -281,7 +317,9 @@ export default function PhotoScreen() {
     if (loading) return;
     const ImagePicker = await getImagePicker();
     if (!ImagePicker) {
-      setError("Photo library is not available. Rebuild the app with expo run:ios.");
+      setError(
+        "Photo library is not available. Rebuild the app with expo run:ios.",
+      );
       return;
     }
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -299,7 +337,10 @@ export default function PhotoScreen() {
       });
       if (!mountedRef.current) return;
       if (!result.canceled && result.assets[0]) {
-        handlePickedAsset(result.assets[0].uri, result.assets[0].base64 ?? null);
+        handlePickedAsset(
+          result.assets[0].uri,
+          result.assets[0].base64 ?? null,
+        );
       }
     } catch {
       if (mountedRef.current) {
@@ -363,15 +404,9 @@ export default function PhotoScreen() {
     try {
       const mealItems: MealItem[] = [];
       for (const f of valid) {
-        const products = await searchProducts(f.name.trim(), 3);
-        const product =
-          products[0] ?? (await lookupProductOnline(f.name.trim()));
-        if (!product) {
-          setError(`Could not find "${f.name}" in the database. Try a different name or remove it.`);
-          setLoading(false);
-          setStep("review");
-          return;
-        }
+        const product = productFromRecognizedIngredient(f.name.trim(), {
+          isDrink: f.isDrink,
+        });
         const grams = parsePortionToGrams(f.portion) ?? 100;
         mealItems.push({
           product,
@@ -392,6 +427,13 @@ export default function PhotoScreen() {
         product: merged,
         healthRisks: analysis.healthRisks,
         analysis,
+        mealDishSummary: dishSummary.trim() || undefined,
+        mealIngredients: valid.map((f) => ({
+          name: f.name.trim(),
+          portion: f.portion,
+          ...(f.confidence != null ? { confidence: f.confidence } : {}),
+        })),
+        mealPhotoUri: imageUri ?? undefined,
       };
       await addToScanHistory(scanResult);
       router.replace(`/results/${scanResult.id}`);
@@ -411,26 +453,37 @@ export default function PhotoScreen() {
       <View
         style={[
           styles.iconCircle,
-          { backgroundColor: isDark ? "rgba(34,197,94,0.2)" : "rgba(22,128,61,0.15)" },
+          {
+            backgroundColor: isDark
+              ? "rgba(34,197,94,0.2)"
+              : "rgba(22,128,61,0.15)",
+          },
         ]}
       >
         <UtensilsCrossed size={36} color={THEME.primary} strokeWidth={2} />
       </View>
-      <Text style={[styles.heading, { color: textColor }]}>
-        Scan your food
-      </Text>
+      <Text style={[styles.heading, { color: textColor }]}>Scan your food</Text>
       <Text style={[styles.subheading, { color: THEME.mutedGrey }]}>
-        Take a picture, submit it for AI analysis, then confirm the meal — add or remove ingredients before your score.
+        Take a picture, submit it for AI analysis, then confirm the meal — add
+        or remove ingredients before your score.
       </Text>
 
       {/* Primary: camera → preview → analyze → confirm */}
       <Button
         onPress={takePhoto}
         disabled={capturing || loading}
-        style={[styles.takePhotoButton, THEME.shadowButton, (capturing || loading) && { opacity: 0.7 }]}
+        style={[
+          styles.takePhotoButton,
+          THEME.shadowButton,
+          (capturing || loading) && { opacity: 0.7 },
+        ]}
       >
         {capturing ? (
-          <ActivityIndicator color="#fff" size="small" style={{ marginRight: 10 }} />
+          <ActivityIndicator
+            color="#fff"
+            size="small"
+            style={{ marginRight: 10 }}
+          />
         ) : (
           <Camera size={22} color="#fff" style={{ marginRight: 10 }} />
         )}
@@ -445,7 +498,10 @@ export default function PhotoScreen() {
         disabled={capturing || loading}
         style={({ pressed }) => [
           styles.secondaryBtn,
-          { borderColor, opacity: capturing || loading ? 0.6 : pressed ? 0.8 : 1 },
+          {
+            borderColor,
+            opacity: capturing || loading ? 0.6 : pressed ? 0.8 : 1,
+          },
         ]}
       >
         <ImageIcon size={20} color={THEME.primary} style={{ marginRight: 8 }} />
@@ -476,25 +532,42 @@ export default function PhotoScreen() {
         </Text>
       </Pressable>
 
-      {error ? (
-        <Text style={styles.errorText}>{error}</Text>
-      ) : null}
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </>
   );
 
   /** After pick: user submits when ready; then we decode + call vision. */
   const renderPreviewStep = () => (
     <>
-      <Text style={[styles.heading, { color: textColor, marginBottom: 8 }]}>Your photo</Text>
-      <Text style={[styles.subheading, { color: THEME.mutedGrey, marginBottom: 16 }]}>
-        Submit when you&apos;re happy with the shot. We&apos;ll match it to typical meals like this, list ingredients, then you confirm or edit.
+      <Text style={[styles.heading, { color: textColor, marginBottom: 8 }]}>
+        Your photo
+      </Text>
+      <Text
+        style={[
+          styles.subheading,
+          { color: THEME.mutedGrey, marginBottom: 16 },
+        ]}
+      >
+        Submit when you&apos;re happy with the shot. We&apos;ll match it to
+        typical meals like this, list ingredients, then you confirm or edit.
       </Text>
       {imageUri ? (
-        <View style={[styles.photoPreview, { backgroundColor: cardBg, borderColor, marginBottom: 20 }]}>
-          <Image source={{ uri: imageUri }} style={styles.photoImage} resizeMode="cover" />
+        <View
+          style={[
+            styles.photoPreview,
+            { backgroundColor: cardBg, borderColor, marginBottom: 20 },
+          ]}
+        >
+          <Image
+            source={{ uri: imageUri }}
+            style={styles.photoImage}
+            resizeMode="cover"
+          />
         </View>
       ) : null}
-      {error ? <Text style={[styles.errorText, { marginBottom: 12 }]}>{error}</Text> : null}
+      {error ? (
+        <Text style={[styles.errorText, { marginBottom: 12 }]}>{error}</Text>
+      ) : null}
       <Button
         onPress={() => void startAiAnalysis()}
         style={[styles.takePhotoButton, THEME.shadowButton]}
@@ -510,7 +583,9 @@ export default function PhotoScreen() {
         ]}
       >
         <Camera size={18} color={THEME.primary} style={{ marginRight: 8 }} />
-        <Text style={{ color: THEME.primary, fontSize: 16, fontWeight: "500" }}>Retake / choose another</Text>
+        <Text style={{ color: THEME.primary, fontSize: 16, fontWeight: "500" }}>
+          Retake / choose another
+        </Text>
       </Pressable>
     </>
   );
@@ -529,14 +604,22 @@ export default function PhotoScreen() {
           },
         ]}
       >
-        <Text style={[styles.analyzingScreenTitle, { color: textColor }]}>Analyzing your meal</Text>
-        <Text style={[styles.analyzingScreenKicker, { color: THEME.mutedGrey }]}>
+        <Text style={[styles.analyzingScreenTitle, { color: textColor }]}>
+          Analyzing your meal
+        </Text>
+        <Text
+          style={[styles.analyzingScreenKicker, { color: THEME.mutedGrey }]}
+        >
           Matching your plate to typical meals and ingredients
         </Text>
 
         {imageUri ? (
           <View style={[styles.analyzingPhotoCard, { borderColor }]}>
-            <Image source={{ uri: imageUri }} style={styles.analyzingPhotoImage} resizeMode="cover" />
+            <Image
+              source={{ uri: imageUri }}
+              style={styles.analyzingPhotoImage}
+              resizeMode="cover"
+            />
             <View style={styles.analyzingPhotoOverlay}>
               <ActivityIndicator color="#fff" size="large" />
             </View>
@@ -547,12 +630,19 @@ export default function PhotoScreen() {
           </View>
         )}
 
-        <Text style={[styles.analyzingHintLine, { color: textColor }]}>{hint}</Text>
+        <Text style={[styles.analyzingHintLine, { color: textColor }]}>
+          {hint}
+        </Text>
         <Text style={[styles.analyzingSubtitle, { color: THEME.mutedGrey }]}>
-          Next you&apos;ll confirm it&apos;s correct, remove anything wrong, and add what we missed.
+          Next you&apos;ll confirm it&apos;s correct, remove anything wrong, and
+          add what we missed.
         </Text>
 
-        <Button variant="ghost" style={styles.analyzingCancel} onPress={cancelAnalyzing}>
+        <Button
+          variant="ghost"
+          style={styles.analyzingCancel}
+          onPress={cancelAnalyzing}
+        >
           <Text style={{ color: THEME.mutedGrey }}>Cancel</Text>
         </Button>
       </View>
@@ -566,8 +656,17 @@ export default function PhotoScreen() {
     return (
       <>
         {imageUri && (
-          <View style={[styles.photoPreview, { backgroundColor: cardBg, borderColor }]}>
-            <Image source={{ uri: imageUri }} style={styles.photoImage} resizeMode="cover" />
+          <View
+            style={[
+              styles.photoPreview,
+              { backgroundColor: cardBg, borderColor },
+            ]}
+          >
+            <Image
+              source={{ uri: imageUri }}
+              style={styles.photoImage}
+              resizeMode="cover"
+            />
           </View>
         )}
 
@@ -575,28 +674,65 @@ export default function PhotoScreen() {
           <View
             style={[
               styles.visionConfigBanner,
-              { backgroundColor: isDark ? "#3f2a1a" : "#fff7ed", borderColor: isDark ? "#92400e" : "#fdba74" },
+              {
+                backgroundColor: isDark ? "#3f2a1a" : "#fff7ed",
+                borderColor: isDark ? "#92400e" : "#fdba74",
+              },
             ]}
           >
-            <Text style={{ color: isDark ? "#fed7aa" : "#9a3412", fontSize: 13, lineHeight: 19 }}>
+            <Text
+              style={{
+                color: isDark ? "#fed7aa" : "#9a3412",
+                fontSize: 13,
+                lineHeight: 19,
+              }}
+            >
               Photo AI is off: add{" "}
-              <Text style={{ fontWeight: "700" }}>EXPO_PUBLIC_OPENAI_API_KEY</Text> or{" "}
-              <Text style={{ fontWeight: "700" }}>EXPO_PUBLIC_SUPABASE_URL</Text> +{" "}
-              <Text style={{ fontWeight: "700" }}>EXPO_PUBLIC_SUPABASE_ANON_KEY</Text> to{" "}
-              <Text style={{ fontWeight: "700" }}>.env</Text> or Doppler, then restart Metro with{" "}
-              <Text style={{ fontWeight: "700" }}>--clear</Text>. Rebuild the dev client after changing{" "}
+              <Text style={{ fontWeight: "700" }}>
+                EXPO_PUBLIC_OPENAI_API_KEY
+              </Text>{" "}
+              or{" "}
+              <Text style={{ fontWeight: "700" }}>
+                EXPO_PUBLIC_SUPABASE_URL
+              </Text>{" "}
+              +{" "}
+              <Text style={{ fontWeight: "700" }}>
+                EXPO_PUBLIC_SUPABASE_ANON_KEY
+              </Text>{" "}
+              to <Text style={{ fontWeight: "700" }}>.env</Text> or Doppler,
+              then restart Metro with{" "}
+              <Text style={{ fontWeight: "700" }}>--clear</Text>. Rebuild the
+              dev client after changing{" "}
               <Text style={{ fontWeight: "700" }}>app.config</Text>.
             </Text>
           </View>
         ) : null}
 
-        <Text style={[styles.sectionTitle, { color: textColor }]}>Confirm your meal</Text>
-        <Text style={{ color: THEME.mutedGrey, fontSize: 13, marginBottom: 14, lineHeight: 19 }}>
-          Is this right? Remove what you didn&apos;t use, add anything we missed, then get your score.
+        <Text style={[styles.sectionTitle, { color: textColor }]}>
+          Confirm your meal
+        </Text>
+        <Text
+          style={{
+            color: THEME.mutedGrey,
+            fontSize: 13,
+            marginBottom: 14,
+            lineHeight: 19,
+          }}
+        >
+          Is this right? Remove what you didn&apos;t use, add anything we
+          missed, then get your score.
         </Text>
 
         {(hasBlend || isMultiItem) && (
-          <View style={[styles.blendBanner, { backgroundColor: isDark ? "#1a2e1a" : "#f0fdf4", borderColor: "#16a34a44" }]}>
+          <View
+            style={[
+              styles.blendBanner,
+              {
+                backgroundColor: isDark ? "#1a2e1a" : "#f0fdf4",
+                borderColor: "#16a34a44",
+              },
+            ]}
+          >
             <Zap size={15} color="#16a34a" style={{ marginRight: 6 }} />
             <Text style={{ color: "#16a34a", fontSize: 13, flex: 1 }}>
               {hasBlend
@@ -612,7 +748,16 @@ export default function PhotoScreen() {
             { backgroundColor: isDark ? "#27272a" : "#f4f4f5", borderColor },
           ]}
         >
-          <Text style={{ color: THEME.mutedGrey, fontSize: 12, marginBottom: 6, fontWeight: "600" }}>Meal</Text>
+          <Text
+            style={{
+              color: THEME.mutedGrey,
+              fontSize: 12,
+              marginBottom: 6,
+              fontWeight: "600",
+            }}
+          >
+            Meal
+          </Text>
           <Input
             value={dishSummary}
             onChangeText={setDishSummary}
@@ -621,7 +766,11 @@ export default function PhotoScreen() {
             style={[
               styles.input,
               styles.mealNameInput,
-              isDark && { borderColor: THEME.borderDark, color: "#f4f4f5", backgroundColor: "#1a1a1a" },
+              isDark && {
+                borderColor: THEME.borderDark,
+                color: "#f4f4f5",
+                backgroundColor: "#1a1a1a",
+              },
             ]}
             placeholderTextColor={isDark ? "#71717a" : undefined}
           />
@@ -632,21 +781,36 @@ export default function PhotoScreen() {
             onPress={reAnalyze}
             style={({ pressed }) => [
               styles.addBtn,
-              { borderStyle: "solid", marginBottom: 8, opacity: pressed ? 0.85 : 1 },
+              {
+                borderStyle: "solid",
+                marginBottom: 8,
+                opacity: pressed ? 0.85 : 1,
+              },
             ]}
           >
             <UtensilsCrossed size={16} color={THEME.primary} />
-            <Text style={{ color: THEME.primary, fontSize: 14, fontWeight: "600" }}>Re-analyze photo</Text>
+            <Text
+              style={{ color: THEME.primary, fontSize: 14, fontWeight: "600" }}
+            >
+              Re-analyze photo
+            </Text>
           </Pressable>
         ) : null}
 
-        <Text style={[styles.ingredientsSectionTitle, { color: textColor }]}>Ingredients</Text>
-        <Text style={{ color: THEME.mutedGrey, fontSize: 12, marginBottom: 10 }}>
-          Trash a row to remove · edit portions · Add ingredient for anything extra.
+        <Text style={[styles.ingredientsSectionTitle, { color: textColor }]}>
+          Ingredients
+        </Text>
+        <Text
+          style={{ color: THEME.mutedGrey, fontSize: 12, marginBottom: 10 }}
+        >
+          Trash a row to remove · edit portions · Add ingredient for anything
+          extra.
         </Text>
 
         {foods.length === 0 ? (
-          <Text style={{ color: THEME.mutedGrey, fontSize: 13, marginBottom: 12 }}>
+          <Text
+            style={{ color: THEME.mutedGrey, fontSize: 13, marginBottom: 12 }}
+          >
             No ingredients yet — tap &quot;Add ingredient&quot; below.
           </Text>
         ) : null}
@@ -654,14 +818,18 @@ export default function PhotoScreen() {
         {foods.map((f) => (
           <View
             key={f.id}
-            style={[styles.ingredientBlock, { backgroundColor: cardBg, borderColor }]}
+            style={[
+              styles.ingredientBlock,
+              { backgroundColor: cardBg, borderColor },
+            ]}
           >
             <View style={styles.ingredientNameRow}>
               <Input
                 value={f.name}
                 onChangeText={(text) => {
                   const isDrinkGuess = defaultPortionForFood(text) === "250ml";
-                  const newPortion = f.portion === "" ? defaultPortionForFood(text) : f.portion;
+                  const newPortion =
+                    f.portion === "" ? defaultPortionForFood(text) : f.portion;
                   updateFood(f.id, {
                     name: text,
                     isDrink: isDrinkGuess,
@@ -687,16 +855,33 @@ export default function PhotoScreen() {
             </View>
             <View style={styles.badgeRow}>
               {f.isDrink && (
-                <View style={[styles.drinkTag, { backgroundColor: isDark ? "#1e3a5f" : "#dbeafe" }]}>
-                  <Text style={{ color: "#2563eb", fontSize: 11, fontWeight: "600" }}>DRINK</Text>
+                <View
+                  style={[
+                    styles.drinkTag,
+                    { backgroundColor: isDark ? "#1e3a5f" : "#dbeafe" },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      color: "#2563eb",
+                      fontSize: 11,
+                      fontWeight: "600",
+                    }}
+                  >
+                    DRINK
+                  </Text>
                 </View>
               )}
-              {f.confidence !== undefined && <ConfidenceBadge confidence={f.confidence} />}
+              {f.confidence !== undefined && (
+                <ConfidenceBadge confidence={f.confidence} />
+              )}
             </View>
             <Input
               value={f.portion}
               onChangeText={(text) => updateFood(f.id, { portion: text })}
-              placeholder={f.isDrink ? "e.g. 250ml, 1 can, 1 glass" : PORTION_PLACEHOLDER}
+              placeholder={
+                f.isDrink ? "e.g. 250ml, 1 can, 1 glass" : PORTION_PLACEHOLDER
+              }
               editable={!loading}
               style={[
                 styles.input,
@@ -715,18 +900,28 @@ export default function PhotoScreen() {
           ]}
         >
           <Plus size={18} color={THEME.primary} />
-          <Text style={{ color: THEME.primary, fontSize: 15, fontWeight: "600" }}>Add ingredient</Text>
+          <Text
+            style={{ color: THEME.primary, fontSize: 15, fontWeight: "600" }}
+          >
+            Add ingredient
+          </Text>
         </Pressable>
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <Button
-          style={[styles.searchScoreBtn, THEME.shadowButton, !canCalculate && { opacity: 0.5 }]}
+          style={[
+            styles.searchScoreBtn,
+            THEME.shadowButton,
+            !canCalculate && { opacity: 0.5 },
+          ]}
           onPress={calculateMealScore}
           disabled={!canCalculate}
         >
           <Search size={18} color="#fff" style={{ marginRight: 8 }} />
-          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 16 }}>Get health score</Text>
+          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 16 }}>
+            Get health score
+          </Text>
         </Button>
       </>
     );
@@ -735,22 +930,42 @@ export default function PhotoScreen() {
   const renderCalculatingStep = () => (
     <View style={styles.centred}>
       {imageUri && (
-        <View style={[styles.photoPreview, { backgroundColor: cardBg, borderColor }]}>
-          <Image source={{ uri: imageUri }} style={styles.photoImage} resizeMode="cover" />
+        <View
+          style={[
+            styles.photoPreview,
+            { backgroundColor: cardBg, borderColor },
+          ]}
+        >
+          <Image
+            source={{ uri: imageUri }}
+            style={styles.photoImage}
+            resizeMode="cover"
+          />
         </View>
       )}
-      <ActivityIndicator color={THEME.primary} size="large" style={{ marginTop: 24 }} />
+      <ActivityIndicator
+        color={THEME.primary}
+        size="large"
+        style={{ marginTop: 24 }}
+      />
       <Text style={[styles.recognizingLabel, { color: textColor }]}>
         Computing health score…
       </Text>
-      <Text style={{ color: THEME.mutedGrey, fontSize: 13, textAlign: "center" }}>
-        Searching database · blending components · analysing nutrition
+      <Text
+        style={{ color: THEME.mutedGrey, fontSize: 13, textAlign: "center" }}
+      >
+        Estimating from your ingredients · blending portions · analysing
+        nutrition
       </Text>
     </View>
   );
 
   if (step === "analyzing") {
-    return <View style={[styles.container, { backgroundColor: bgColor }]}>{renderAnalyzingScreen()}</View>;
+    return (
+      <View style={[styles.container, { backgroundColor: bgColor }]}>
+        {renderAnalyzingScreen()}
+      </View>
+    );
   }
 
   return (
@@ -769,7 +984,11 @@ export default function PhotoScreen() {
         {step === "calculating" && renderCalculatingStep()}
 
         {step !== "calculating" ? (
-          <Button variant="ghost" style={styles.cancelBtn} onPress={() => router.back()}>
+          <Button
+            variant="ghost"
+            style={styles.cancelBtn}
+            onPress={() => router.back()}
+          >
             <Text style={{ color: THEME.mutedGrey }}>Cancel</Text>
           </Button>
         ) : null}

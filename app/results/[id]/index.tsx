@@ -1,17 +1,6 @@
 import { useFocusEffect } from "@react-navigation/native";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import * as React from "react";
-import {
-  ActivityIndicator,
-  Modal,
-  Pressable,
-  ScrollView,
-  Share,
-  TouchableOpacity,
-  useColorScheme,
-  View,
-} from "react-native";
 import { Image } from "expo-image";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   ArrowLeft,
   BarChart3,
@@ -26,34 +15,48 @@ import {
   TrendingUp,
   UtensilsCrossed,
 } from "lucide-react-native";
+import * as React from "react";
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  ScrollView,
+  Share,
+  TouchableOpacity,
+  useColorScheme,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ExpandableSection } from "@/components/expandable-section";
+import { FoodAssistantChat } from "@/components/food-assistant-chat";
+import { ScoreGauge } from "@/components/graphics/score-gauge";
+import { SubscoreBars } from "@/components/graphics/subscore-bars";
 import { Button } from "@/components/ui/button.native";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
-import { ScoreGauge } from "@/components/graphics/score-gauge";
-import { SubscoreBars } from "@/components/graphics/subscore-bars";
-import { ExpandableSection } from "@/components/expandable-section";
-import { FoodAssistantChat } from "@/components/food-assistant-chat";
+import { getContextNote, getScanContext } from "@/lib/context-aware";
+import { getDisplayProductName } from "@/lib/product-display";
+import { confidenceLabel } from "@/lib/recognize-food";
+import { useSubscription } from "@/lib/revenuecat";
+import {
+  getScanResultSubtitle,
+  getScanResultTitle,
+  isScannedMeal,
+} from "@/lib/scan-display";
+import { analyzeProduct } from "@/lib/scoring";
 import {
   addFavorite,
-  getFavorites,
   getFavoriteNote,
   getHealthProfile,
-  getScanHistory,
   isFavorite,
   removeFavorite,
   setFavoriteNote,
   updateScanResult,
 } from "@/lib/storage";
-import type { MealType } from "@/types/food";
-import { getScanContext, getContextNote } from "@/lib/context-aware";
-import { analyzeProduct } from "@/lib/scoring";
-import { getDisplayBrand, getDisplayProductName } from "@/lib/product-display";
-import { useScanResult } from "@/lib/use-scan-result";
 import { THEME } from "@/lib/theme";
-import { useSubscription } from "@/lib/revenuecat";
-import type { HealthProfile, ScanResult } from "@/types/food";
+import { useScanResult } from "@/lib/use-scan-result";
+import type { HealthProfile, MealType, ScanResult } from "@/types/food";
 
 const PRO_SECTIONS = new Set(["swaps", "health"]);
 
@@ -63,7 +66,12 @@ const SECTION_BUTTONS = [
   { key: "swaps", label: "Swaps", route: "swaps", Icon: RefreshCw },
   { key: "nutrition", label: "Nutrition", route: "nutrition", Icon: Flame },
   { key: "health", label: "Health", route: "health", Icon: HeartPulse },
-  { key: "ingredients", label: "Ingredients", route: "ingredients", Icon: List },
+  {
+    key: "ingredients",
+    label: "Ingredients",
+    route: "ingredients",
+    Icon: List,
+  },
   { key: "exposure", label: "Exposure", route: "exposure", Icon: BarChart3 },
 ] as const;
 
@@ -90,7 +98,9 @@ export default function ResultIndexScreen() {
   const [display, setDisplay] = React.useState<ScanResult | null>(null);
   const [fav, setFav] = React.useState(false);
   const [favoriteNote, setFavoriteNoteState] = React.useState("");
-  const [profileExists, setProfileExists] = React.useState<boolean | null>(null);
+  const [profileExists, setProfileExists] = React.useState<boolean | null>(
+    null,
+  );
   const [profile, setProfile] = React.useState<HealthProfile | null>(null);
   const [chatOpen, setChatOpen] = React.useState(false);
   const [contextNote, setContextNote] = React.useState<string | null>(null);
@@ -113,7 +123,9 @@ export default function ResultIndexScreen() {
       setProfile(p);
       setProfileExists(!!p);
       const nextAnalysis = analyzeProduct(p, result.product);
-      const same = JSON.stringify(result.analysis ?? null) === JSON.stringify(nextAnalysis);
+      const same =
+        JSON.stringify(result.analysis ?? null) ===
+        JSON.stringify(nextAnalysis);
       if (same) return;
       const next: ScanResult = {
         ...result,
@@ -170,7 +182,10 @@ export default function ResultIndexScreen() {
 
   if (loading) {
     return (
-      <View className="flex-1 items-center justify-center bg-background" style={isDark ? { backgroundColor: "#000000" } : undefined}>
+      <View
+        className="flex-1 items-center justify-center bg-background"
+        style={isDark ? { backgroundColor: "#000000" } : undefined}
+      >
         <ActivityIndicator size="large" />
       </View>
     );
@@ -178,9 +193,20 @@ export default function ResultIndexScreen() {
 
   if (!display) {
     return (
-      <View className="flex-1 items-center justify-center bg-background p-4" style={isDark ? { backgroundColor: "#000000" } : undefined}>
-        <Text className="text-center text-muted-foreground" style={textMuted}>Result not found.</Text>
-        <Button className="mt-4" onPress={() => router.back()} style={isDark ? { borderWidth: 1, borderColor: "#525252" } : undefined}>
+      <View
+        className="flex-1 items-center justify-center bg-background p-4"
+        style={isDark ? { backgroundColor: "#000000" } : undefined}
+      >
+        <Text className="text-center text-muted-foreground" style={textMuted}>
+          Result not found.
+        </Text>
+        <Button
+          className="mt-4"
+          onPress={() => router.back()}
+          style={
+            isDark ? { borderWidth: 1, borderColor: "#525252" } : undefined
+          }
+        >
           <Text className="text-primary-foreground">Back</Text>
         </Button>
       </View>
@@ -189,6 +215,26 @@ export default function ResultIndexScreen() {
 
   const { product } = display;
   const analysis = display.analysis;
+  const scannedMeal = isScannedMeal(display);
+  const heroTitle = getScanResultTitle(display);
+  const heroSubtitle = getScanResultSubtitle(display);
+  const expandImageUri = scannedMeal
+    ? (display.mealPhotoUri ??
+      product.image_url ??
+      product.image_small_url ??
+      undefined)
+    : (product.image_url ?? product.image_small_url ?? undefined);
+
+  const shareMessage = () => {
+    const score = analysis?.overallScore ?? 0;
+    if (scannedMeal && display.mealIngredients?.length) {
+      const lines = display.mealIngredients
+        .map((i) => `• ${i.name}${i.portion ? ` (${i.portion})` : ""}`)
+        .join("\n");
+      return `${heroTitle}\nHealth score: ${score}/100\n\n${lines}\n\nAnalyzed with FoodScan.`;
+    }
+    return `${getDisplayProductName(product)} — Health score: ${score}/100. Analyzed with FoodScan.`;
+  };
 
   return (
     <View
@@ -212,31 +258,66 @@ export default function ResultIndexScreen() {
           justifyContent: "center",
         }}
       >
-        <View className="flex-row items-center justify-between" style={{ height: headerRowHeight }}>
-          <Button variant="ghost" size="icon" onPress={() => router.back()} accessibilityLabel="Go back">
+        <View
+          className="flex-row items-center justify-between"
+          style={{ height: headerRowHeight }}
+        >
+          <Button
+            variant="ghost"
+            size="icon"
+            onPress={() => router.back()}
+            accessibilityLabel="Go back"
+          >
             <ArrowLeft size={20} color={iconColor} />
           </Button>
           <View className="flex-row items-center gap-1">
-            <Button variant="ghost" size="icon" onPress={() => setChatOpen(true)} accessibilityLabel="Ask about this food">
+            <Button
+              variant="ghost"
+              size="icon"
+              onPress={() => setChatOpen(true)}
+              accessibilityLabel="Ask about this food"
+            >
               <MessageCircle size={20} color={iconColor} />
             </Button>
-            <Button variant="ghost" size="icon" onPress={() => router.push({ pathname: "/reaction", params: { scanId: display.id } })} accessibilityLabel="Log a body reaction">
+            <Button
+              variant="ghost"
+              size="icon"
+              onPress={() =>
+                router.push({
+                  pathname: "/reaction",
+                  params: { scanId: display.id },
+                })
+              }
+              accessibilityLabel="Log a body reaction"
+            >
               <HeartPulse size={20} color={iconColor} />
             </Button>
             <Button
               variant="ghost"
               size="icon"
               onPress={() => {
-                const name = getDisplayProductName(product);
-                const score = analysis?.overallScore ?? 0;
-                Share.share({ message: `${name} — Health score: ${score}/100. Analyzed with FoodScan.`, title: "FoodScan result" });
+                Share.share({
+                  message: shareMessage(),
+                  title: "FoodScan result",
+                });
               }}
               accessibilityLabel="Share result"
             >
               <Share2 size={20} color={iconColor} />
             </Button>
-            <Button variant="ghost" size="icon" onPress={toggleFavorite} accessibilityLabel={fav ? "Remove from favorites" : "Save to favorites"}>
-              <Star size={20} color={fav ? "#16a34a" : iconColor} fill={fav ? "#16a34a" : "transparent"} />
+            <Button
+              variant="ghost"
+              size="icon"
+              onPress={toggleFavorite}
+              accessibilityLabel={
+                fav ? "Remove from favorites" : "Save to favorites"
+              }
+            >
+              <Star
+                size={20}
+                color={fav ? "#16a34a" : iconColor}
+                fill={fav ? "#16a34a" : "transparent"}
+              />
             </Button>
           </View>
         </View>
@@ -244,31 +325,110 @@ export default function ResultIndexScreen() {
 
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 24, paddingTop: headerHeight + 4 }}
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          paddingBottom: insets.bottom + 24,
+          paddingTop: headerHeight + 4,
+        }}
       >
-        {/* Product hero: thumbnail + name side by side */}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 }}>
-          {(product.image_small_url || product.image_url) && (
+        {/* Hero: scanned meal (photo or icon) vs packaged product thumbnail */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 12,
+            marginBottom: 12,
+          }}
+        >
+          {scannedMeal ? (
+            display.mealPhotoUri ? (
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => expandImageUri && setImageExpanded(true)}
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 12,
+                  overflow: "hidden",
+                  backgroundColor: "#e5e7eb",
+                  flexShrink: 0,
+                }}
+              >
+                <Image
+                  source={{ uri: display.mealPhotoUri }}
+                  style={{ width: 64, height: 64 }}
+                  contentFit="cover"
+                />
+              </TouchableOpacity>
+            ) : (
+              <View
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 12,
+                  flexShrink: 0,
+                  backgroundColor: isDark
+                    ? "rgba(34,197,94,0.15)"
+                    : "rgba(22,128,61,0.12)",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <UtensilsCrossed
+                  size={30}
+                  color={THEME.primary}
+                  strokeWidth={2}
+                />
+              </View>
+            )
+          ) : product.image_small_url || product.image_url ? (
             <TouchableOpacity
               activeOpacity={0.8}
               onPress={() => setImageExpanded(true)}
-              style={{ width: 64, height: 64, borderRadius: 12, overflow: "hidden", backgroundColor: "#e5e7eb", flexShrink: 0 }}
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: 12,
+                overflow: "hidden",
+                backgroundColor: "#e5e7eb",
+                flexShrink: 0,
+              }}
             >
-              <Image source={{ uri: product.image_small_url ?? product.image_url ?? undefined }} style={{ width: 64, height: 64 }} contentFit="cover" />
+              <Image
+                source={{
+                  uri:
+                    product.image_small_url ?? product.image_url ?? undefined,
+                }}
+                style={{ width: 64, height: 64 }}
+                contentFit="cover"
+              />
             </TouchableOpacity>
-          )}
+          ) : null}
           <View style={{ flex: 1 }}>
-            <Text className="font-bold text-foreground" style={[textWhite, { fontSize: 26, lineHeight: 32 }]}>
-              {getDisplayProductName(product)}
+            <Text
+              className="font-bold text-foreground"
+              style={[textWhite, { fontSize: 26, lineHeight: 32 }]}
+            >
+              {heroTitle}
             </Text>
-            <Text className="text-muted-foreground" style={[textMuted, { fontSize: 16, marginTop: 2 }]}>
-              {getDisplayBrand(product) ?? "Unknown"}
+            <Text
+              className="text-muted-foreground"
+              style={[textMuted, { fontSize: 16, marginTop: 2 }]}
+            >
+              {heroSubtitle}
             </Text>
           </View>
         </View>
         <View className="mt-2 flex-row flex-wrap gap-2">
-          <Text className="text-xs text-muted-foreground self-center" style={textMuted}>Log as: </Text>
-          {(["breakfast", "lunch", "dinner", "snack", "other"] as MealType[]).map((meal) => (
+          <Text
+            className="self-center text-muted-foreground text-xs"
+            style={textMuted}
+          >
+            Log as:{" "}
+          </Text>
+          {(
+            ["breakfast", "lunch", "dinner", "snack", "other"] as MealType[]
+          ).map((meal) => (
             <Pressable
               key={meal}
               onPress={async () => {
@@ -278,25 +438,134 @@ export default function ResultIndexScreen() {
               }}
               className="rounded-full border px-3 py-1.5"
               style={{
-                borderColor: display.mealType === meal ? "#16a34a" : isDark ? "#333" : "#e5e7eb",
-                backgroundColor: display.mealType === meal ? "rgba(34,197,94,0.15)" : isDark ? "#1a1a1a" : "transparent",
+                borderColor:
+                  display.mealType === meal
+                    ? "#16a34a"
+                    : isDark
+                      ? "#333"
+                      : "#e5e7eb",
+                backgroundColor:
+                  display.mealType === meal
+                    ? "rgba(34,197,94,0.15)"
+                    : isDark
+                      ? "#1a1a1a"
+                      : "transparent",
               }}
             >
-              <Text className="text-xs capitalize" style={{ color: display.mealType === meal ? "#16a34a" : isDark ? "#a1a1aa" : "#64748b" }}>{meal}</Text>
+              <Text
+                className="text-xs capitalize"
+                style={{
+                  color:
+                    display.mealType === meal
+                      ? "#16a34a"
+                      : isDark
+                        ? "#a1a1aa"
+                        : "#64748b",
+                }}
+              >
+                {meal}
+              </Text>
             </Pressable>
           ))}
         </View>
 
+        {scannedMeal &&
+          display.mealIngredients &&
+          display.mealIngredients.length > 0 && (
+            <Card
+              className="mt-1"
+              style={{
+                backgroundColor: isDark ? "#0a0a0a" : "#ffffff",
+                borderWidth: 1,
+                borderColor: isDark ? "#262626" : "#e5e7eb",
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.05,
+                shadowRadius: 6,
+                elevation: 2,
+              }}
+            >
+              <CardHeader className="pb-2">
+                <CardTitle style={[textWhite, { fontSize: 16 }]}>
+                  Your ingredients
+                </CardTitle>
+                <Text
+                  className="text-muted-foreground text-xs leading-4"
+                  style={textMuted}
+                >
+                  Same lines you confirmed after AI scan (add or remove items
+                  there before scoring).
+                </Text>
+              </CardHeader>
+              <CardContent className="pt-0">
+                {display.mealIngredients.map((line, idx) => (
+                  <View
+                    key={`${line.name}-${idx}`}
+                    style={{
+                      paddingVertical: 12,
+                      borderTopWidth: idx > 0 ? 1 : 0,
+                      borderTopColor: isDark ? "#262626" : "#f4f4f5",
+                    }}
+                  >
+                    <Text
+                      className="font-medium text-base text-foreground"
+                      style={textWhite}
+                    >
+                      {line.name}
+                    </Text>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        flexWrap: "wrap",
+                        gap: 8,
+                        marginTop: 4,
+                      }}
+                    >
+                      {line.portion ? (
+                        <Text
+                          className="text-muted-foreground text-sm"
+                          style={textMuted}
+                        >
+                          {line.portion}
+                        </Text>
+                      ) : null}
+                      {line.confidence != null ? (
+                        <Text
+                          className="text-muted-foreground text-sm"
+                          style={textMuted}
+                        >
+                          {line.confidence}% ·{" "}
+                          {confidenceLabel(line.confidence)}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
         {fav && display && (
           <View className="mt-3">
-            <Text className="mb-1 text-xs text-muted-foreground" style={textMuted}>Note for this favorite</Text>
+            <Text
+              className="mb-1 text-muted-foreground text-xs"
+              style={textMuted}
+            >
+              Note for this favorite
+            </Text>
             <Input
               className="min-h-0 border-border bg-muted/30"
               value={favoriteNote}
               onChangeText={setFavoriteNoteState}
-              onBlur={() => display.id && setFavoriteNote(display.id, favoriteNote)}
+              onBlur={() =>
+                display.id && setFavoriteNote(display.id, favoriteNote)
+              }
               placeholder="e.g. good for road trips"
-              style={isDark ? { borderColor: "#525252", color: "#f4f4f5" } : undefined}
+              style={
+                isDark
+                  ? { borderColor: "#525252", color: "#f4f4f5" }
+                  : undefined
+              }
             />
           </View>
         )}
@@ -305,13 +574,23 @@ export default function ResultIndexScreen() {
           <Card className="mt-4 border-warning bg-warning/10">
             <CardHeader>
               <CardTitle style={textWhite}>Generic analysis</CardTitle>
-              <Text className="text-sm text-muted-foreground" style={textMuted}>
-                Create a Health Profile to unlock personalized allergy, condition, and goal-based feedback.
+              <Text className="text-muted-foreground text-sm" style={textMuted}>
+                Create a Health Profile to unlock personalized allergy,
+                condition, and goal-based feedback.
               </Text>
             </CardHeader>
             <CardContent className="gap-2">
-              <Button onPress={() => router.push("/(tabs)/profile")} style={isDark ? { borderWidth: 1, borderColor: "#525252" } : undefined}>
-                <Text className="text-primary-foreground">Create Health Profile</Text>
+              <Button
+                onPress={() => router.push("/(tabs)/profile")}
+                style={
+                  isDark
+                    ? { borderWidth: 1, borderColor: "#525252" }
+                    : undefined
+                }
+              >
+                <Text className="text-primary-foreground">
+                  Create Health Profile
+                </Text>
               </Button>
             </CardContent>
           </Card>
@@ -331,14 +610,24 @@ export default function ResultIndexScreen() {
             }}
           >
             <CardHeader className="pb-2">
-              <CardTitle style={[textWhite, { fontSize: 18 }]}>Health score</CardTitle>
+              <CardTitle style={[textWhite, { fontSize: 18 }]}>
+                Health score
+              </CardTitle>
               {contextNote && (
-                <Text className="mt-1 text-xs text-muted-foreground" style={textMuted}>
+                <Text
+                  className="mt-1 text-muted-foreground text-xs"
+                  style={textMuted}
+                >
                   {contextNote}
                 </Text>
               )}
-              <Text className="mt-1.5 text-sm text-muted-foreground leading-5" style={textMuted}>
-                Overall and detailed scoring based on nutrition, additives, processing, diet fit, and your profile.
+              <Text
+                className="mt-1.5 text-muted-foreground text-sm leading-5"
+                style={textMuted}
+              >
+                {scannedMeal
+                  ? "Estimated from your ingredient list and portions (not a single packaged product label), plus additives, processing, diet fit, and your profile."
+                  : "Overall and detailed scoring based on nutrition, additives, processing, diet fit, and your profile."}
               </Text>
             </CardHeader>
             <CardContent className="gap-6 pb-6">
@@ -347,24 +636,55 @@ export default function ResultIndexScreen() {
                   paddingVertical: 20,
                   paddingHorizontal: 16,
                   borderRadius: 12,
-                  backgroundColor: analysis.overallScore >= 75 ? (isDark ? "rgba(34,197,94,0.06)" : "rgba(22,128,61,0.05)") : "transparent",
+                  backgroundColor:
+                    analysis.overallScore >= 75
+                      ? isDark
+                        ? "rgba(34,197,94,0.06)"
+                        : "rgba(22,128,61,0.05)"
+                      : "transparent",
                 }}
               >
                 <View style={{ alignItems: "center", marginBottom: 20 }}>
-                  <ScoreGauge score={analysis.overallScore} label={analysis.overallLabel.toUpperCase()} size={140} isDark={isDark} />
+                  <ScoreGauge
+                    score={analysis.overallScore}
+                    label={analysis.overallLabel.toUpperCase()}
+                    size={140}
+                    isDark={isDark}
+                  />
                 </View>
                 <View style={{ width: "100%", paddingHorizontal: 4 }}>
-                  <SubscoreBars subscores={analysis.subscores} isDark={isDark} />
+                  <SubscoreBars
+                    subscores={analysis.subscores}
+                    isDark={isDark}
+                  />
                 </View>
               </View>
-              <ExpandableSection title="Why this score?" defaultOpen={false} isDark={isDark}>
-                <Text className="text-sm text-muted-foreground" style={textMuted}>
-                  The score combines allergens, nutrition, additives, processing, and how well it fits your diet and profile.
+              <ExpandableSection
+                title="Why this score?"
+                defaultOpen={false}
+                isDark={isDark}
+              >
+                <Text
+                  className="text-muted-foreground text-sm"
+                  style={textMuted}
+                >
+                  {scannedMeal
+                    ? "Each ingredient is modeled with typical nutrition for its category, then blended by portion. Additives and processing reflect that combined estimate."
+                    : "The score combines allergens, nutrition, additives, processing, and how well it fits your diet and profile."}
                 </Text>
               </ExpandableSection>
               <View className="mt-2">
-                <Text className="mb-3 text-sm font-medium text-foreground" style={textWhite}>View details</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 16 }}>
+                <Text
+                  className="mb-3 font-medium text-foreground text-sm"
+                  style={textWhite}
+                >
+                  View details
+                </Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingRight: 16 }}
+                >
                   {SECTION_BUTTONS.map(({ key, label, route, Icon }) => {
                     const isLocked = PRO_SECTIONS.has(route) && !isPro;
                     return (
@@ -385,11 +705,22 @@ export default function ResultIndexScreen() {
                         }}
                       >
                         {isLocked ? (
-                          <Crown size={18} color={THEME.primary} strokeWidth={2} />
+                          <Crown
+                            size={18}
+                            color={THEME.primary}
+                            strokeWidth={2}
+                          />
                         ) : (
-                          <Icon size={18} color={isDark ? "#a1a1aa" : "#15803d"} strokeWidth={2} />
+                          <Icon
+                            size={18}
+                            color={isDark ? "#a1a1aa" : "#15803d"}
+                            strokeWidth={2}
+                          />
                         )}
-                        <Text className="text-sm font-medium" style={{ color: isDark ? "#f4f4f5" : "#18181b" }}>
+                        <Text
+                          className="font-medium text-sm"
+                          style={{ color: isDark ? "#f4f4f5" : "#18181b" }}
+                        >
                           {label}
                         </Text>
                       </Pressable>
@@ -400,24 +731,38 @@ export default function ResultIndexScreen() {
             </CardContent>
           </Card>
         )}
-
       </ScrollView>
 
-      <FoodAssistantChat visible={chatOpen} onClose={() => setChatOpen(false)} product={product} analysis={analysis ?? undefined} profile={profile} />
+      <FoodAssistantChat
+        visible={chatOpen}
+        onClose={() => setChatOpen(false)}
+        product={product}
+        analysis={analysis ?? undefined}
+        profile={profile}
+      />
 
       {/* Full-screen image modal */}
       <Modal
-        visible={imageExpanded}
+        visible={imageExpanded && !!expandImageUri}
         transparent
         animationType="fade"
         onRequestClose={() => setImageExpanded(false)}
       >
-        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", alignItems: "center", justifyContent: "center" }}>
-          <Image
-            source={{ uri: product.image_url ?? product.image_small_url ?? undefined }}
-            style={{ width: "90%", height: "70%", borderRadius: 16 }}
-            contentFit="contain"
-          />
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.92)",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {expandImageUri ? (
+            <Image
+              source={{ uri: expandImageUri }}
+              style={{ width: "90%", height: "70%", borderRadius: 16 }}
+              contentFit="contain"
+            />
+          ) : null}
           <TouchableOpacity
             onPress={() => setImageExpanded(false)}
             style={{
@@ -432,7 +777,16 @@ export default function ResultIndexScreen() {
               justifyContent: "center",
             }}
           >
-            <Text style={{ color: "#ffffff", fontSize: 18, fontWeight: "600", lineHeight: 20 }}>✕</Text>
+            <Text
+              style={{
+                color: "#ffffff",
+                fontSize: 18,
+                fontWeight: "600",
+                lineHeight: 20,
+              }}
+            >
+              ✕
+            </Text>
           </TouchableOpacity>
         </View>
       </Modal>
