@@ -7,6 +7,7 @@ import {
   translateIngredientToEnglishMulti,
   translateIngredientsListToEnglish,
 } from "@/lib/ingredients";
+import { getLocalSwapTips } from "@/lib/swaps";
 
 function normalize(s: string): string {
   return s
@@ -78,7 +79,10 @@ function guessIngredientFromQuestion(question: string, product?: ProductResult):
   const cleanQ = q.replace(/[?!.,]+$/, "").trim();
   const stopWords = /^(what|why|how|is|are|can|does|do|should|tell|explain|the|a|an|this|that|it|give|show|help|i|me|my|about|for|in|on|at|to|of|and|or)$/;
   const words = cleanQ.split(/\s+/);
-  const isLikelyBareName = words.length <= 5 && !words.some((w) => stopWords.test(w.toLowerCase())) && !/\b(healthy|bad|good|safe|alternative|swap)\b/.test(cleanQ);
+  const isLikelyBareName =
+    words.length <= 5 &&
+    !words.some((w) => stopWords.test(w.toLowerCase())) &&
+    !/\b(healthy|bad|good|safe|alternative|swap|snack|snacks|breakfast|lunch|dinner|meal|meals|drink|drinks|beverage|beverages|dessert|desserts)\b/.test(cleanQ);
   if (isLikelyBareName && cleanQ.length >= 2) {
     return cleanQ;
   }
@@ -169,6 +173,150 @@ function isIngredientListQuestion(question: string): boolean {
 function isSwapQuestion(question: string): boolean {
   const q = normalize(question);
   return /\b(healthier|healthier option|swap|alternative|better option|substitute)\b/.test(q);
+}
+
+/** "What are some others", "any more swaps" — wants more alternatives, not a product recap. */
+function isMoreSwapSuggestionsQuestion(
+  question: string,
+  chatHistory?: { role: string; content: string }[],
+): boolean {
+  const n = normalize(question);
+  if (n.length > 120) return false;
+  if (
+    /\bwhat (are )?(some )?others?\b/.test(n) ||
+    /\b(any|got) (other )?(thing|things|swap|swaps) else\b/.test(n) ||
+    /\banything else\b/.test(n) ||
+    /\bmore suggestions?\b/.test(n) ||
+    /\bother ideas?\b/.test(n) ||
+    /\bmore swaps?\b/.test(n) ||
+    /\bother swaps?\b/.test(n) ||
+    /\b(more|other|another) (healthy |healthier )?(alternative|alternatives|option|options|pick|picks)\b/.test(n) ||
+    /\b(what|any) else (could|can|should) (i |you )?(try|eat|get|have|suggest)\b/.test(n)
+  ) {
+    return true;
+  }
+  if (/\b(give|show|tell) me more\b/.test(n) && /\b(swap|alternative|idea|option|pick|recommendation)\b/.test(n)) {
+    return true;
+  }
+  // Vague "few more" / "couple more" — only after a swap-oriented reply (avoids hijacking other threads).
+  const vagueMore =
+    /\bgive me (a )?(few |couple )?more\b/.test(n) ||
+    /\b(a )?(few|couple) more\b/.test(n) ||
+    /\b(need|want) (a )?(few |couple )?more\b/.test(n);
+  if (vagueMore && chatHistory?.length) {
+    const lastAssistant = [...chatHistory].reverse().find((m) => m.role === "assistant");
+    if (
+      lastAssistant &&
+      /\b(swap|swaps|alternative|alternatives|healthier|substitute|try instead|instead of|smarter swap|concrete swap|good swaps|other option|other pick)\b/i.test(
+        lastAssistant.content,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function supplementalSwapBullets(product: ProductResult): string[] {
+  const blob = normalize(`${product.product_name ?? ""} ${(product.categories_tags ?? []).join(" ")}`);
+  if (/\b(candy|gummy|skittles|haribo|sweet|confection|chew|chews|marshmallow|patch|sour patch)\b/.test(blob)) {
+    return [
+      "• Frozen grapes or banana slices — cold, naturally sweet, no added sugar.",
+      "• A small square of 70%+ dark chocolate or cocoa-dusted almonds — less sugar than chewy candy.",
+      "• Apple with cinnamon, or a date with nut butter — fiber helps balance sweetness.",
+    ];
+  }
+  if (/\b(chocolate|cocoa|m&m|gem|truffle)\b/.test(blob)) {
+    return [
+      "• Cacao nibs or 85%+ dark chocolate — rich flavor, smaller portions.",
+      "• Berries with plain Greek yogurt — sweet plus protein.",
+    ];
+  }
+  if (/\b(chip|crisp|dorito|pretzel|cracker)\b/.test(blob)) {
+    return [
+      "• Air-popped popcorn with a little olive oil and salt, or veggies with hummus.",
+      "• Roasted chickpeas or edamame — crunchy, more protein and fiber.",
+    ];
+  }
+  if (/\b(soda|cola|soft drink|pop|carbonated)\b/.test(blob)) {
+    return [
+      "• Sparkling water with lemon or lime, or iced herbal tea — bubbles without syrup.",
+    ];
+  }
+  return [
+    "• Whole fruit, plain yogurt, or a small handful of unsalted nuts.",
+    "• Veggies with hummus, or whole-grain crackers with cheese.",
+  ];
+}
+
+function moreSwapSuggestionsAnswer(product: ProductResult): string {
+  const displayName =
+    product.product_name_en ??
+    product.product_name ??
+    product.generic_name_en ??
+    product.generic_name ??
+    "this item";
+  const tips = getLocalSwapTips(product);
+  const lines: string[] = [
+    `Here are more swap ideas for ${displayName} (not a repeat of the full product label):`,
+    "",
+    "Try also:",
+    ...supplementalSwapBullets(product),
+    "",
+  ];
+  if (tips.length > 0) {
+    lines.push("Earlier picks (Smarter swaps):", ...tips.map((t) => `• ${t.suggestion} — ${t.reason}`), "", "");
+  }
+  lines.push("Use Smarter swaps on the result screen to find matching products in the database.");
+  return lines.join("\n");
+}
+
+/** User replied with only a meal type after we asked "snack, breakfast, drink…?" — not an ingredient name. */
+function swapCategoryFollowUpLabel(question: string): string | null {
+  const q = normalize(question).replace(/[?!.,]+$/, "").trim();
+  if (!q || q.split(/\s+/).length > 4) return null;
+  if (/^snacks?$/.test(q)) return "snack";
+  if (/^breakfast$/.test(q)) return "breakfast";
+  if (/^lunch$/.test(q)) return "lunch";
+  if (/^dinner$/.test(q)) return "dinner";
+  if (/^meals?$/.test(q)) return "meal";
+  if (/^drinks?$/.test(q) || /^beverages?$/.test(q)) return "drink";
+  if (/^desserts?$/.test(q)) return "dessert";
+  return null;
+}
+
+const SWAP_CATEGORY_GENERIC: Record<string, string> = {
+  snack:
+    "For healthier snacks: try fresh fruit, plain Greek yogurt, unsalted nuts, or veggies with hummus — more protein and fiber, less added sugar than typical candy or chips.",
+  breakfast:
+    "For breakfast: oatmeal with fruit, eggs with whole-grain toast, or plain yogurt with berries — steadier energy than very sugary cereals or pastries.",
+  lunch:
+    "For lunch: a meal with lean protein, vegetables, and whole grains — easier on blood sugar than mostly refined carbs.",
+  dinner:
+    "For dinner: half the plate vegetables, a palm-sized lean protein, and whole grains or beans — lighter than heavy ultra-processed mains.",
+  meal:
+    "For balanced meals: combine protein, fiber (veg/beans/whole grains), and healthy fats — keeps you full longer than mostly sugar or refined starch.",
+  drink:
+    "For drinks: water, sparkling water, unsweetened tea, or coffee without lots of syrup — far less sugar than soda or sweetened coffee.",
+  dessert:
+    "For dessert: fruit, dark chocolate (70%+), or yogurt with cinnamon — usually less sugar than candy or frosting-heavy treats.",
+};
+
+function swapCategoryFollowUpAnswer(product: ProductResult, category: string): string {
+  const displayName =
+    product.product_name_en ?? product.product_name ?? product.generic_name_en ?? product.generic_name ?? "this product";
+  const tips = getLocalSwapTips(product).slice(0, 4);
+  if (tips.length > 0) {
+    const lines: string[] = [
+      `You asked for ${category} ideas — here are concrete swaps that fit ${displayName} (same picks as Smarter swaps):`,
+      "",
+      ...tips.map((t) => `• ${t.suggestion} — ${t.reason}`),
+      "",
+      "Use Smarter swaps on the result screen to open catalog matches when we have them.",
+    ];
+    return lines.join("\n");
+  }
+  return SWAP_CATEGORY_GENERIC[category] ?? healthierOptionAnswer(product);
 }
 
 function healthierOptionAnswer(product?: ProductResult): string {
@@ -424,6 +572,7 @@ function answerFoodQuestionLocal(args: {
   analysis?: ProductAnalysis;
   profile?: HealthProfile | null;
   reactionSummary?: string;
+  chatHistory?: { role: string; content: string }[];
 }): string {
   const q = args.question.trim();
   if (!q) return "Ask a question about ingredients, additives, or nutrition.";
@@ -431,8 +580,19 @@ function answerFoodQuestionLocal(args: {
     args.reactionSummary &&
     " Your logged symptoms and notes are used to personalize advice and spot patterns (see Today tab).";
 
+  if (isMoreSwapSuggestionsQuestion(q, args.chatHistory) && args.product) {
+    const base = moreSwapSuggestionsAnswer(args.product);
+    return reactionTip ? `${base}${reactionTip}` : base;
+  }
+
   if (isSwapQuestion(q)) {
     const base = healthierOptionAnswer(args.product);
+    return reactionTip ? `${base}${reactionTip}` : base;
+  }
+
+  const categoryFollowUp = swapCategoryFollowUpLabel(q);
+  if (categoryFollowUp && args.product) {
+    const base = swapCategoryFollowUpAnswer(args.product, categoryFollowUp);
     return reactionTip ? `${base}${reactionTip}` : base;
   }
 
@@ -728,6 +888,8 @@ function universalIngredientAnswer(term: string, product?: ProductResult): strin
   return `${display} is a food ingredient used in this product.${positionInfo} It's a recognised ingredient considered safe for consumption.`;
 }
 
+export type FoodAssistantChatTurn = { role: "user" | "assistant"; content: string };
+
 export async function answerFoodQuestion(args: {
   question: string;
   product?: ProductResult;
@@ -735,7 +897,29 @@ export async function answerFoodQuestion(args: {
   profile?: HealthProfile | null;
   /** Summary of user's logged body reactions (symptoms, severity, notes) for personalized advice */
   reactionSummary?: string;
+  /** Prior turns (exclude the current question). Improves follow-ups when using the LLM. */
+  chatHistory?: FoodAssistantChatTurn[];
 }): Promise<string> {
+  const q0 = args.question.trim();
+  if (isMoreSwapSuggestionsQuestion(q0, args.chatHistory) && args.product) {
+    const base = moreSwapSuggestionsAnswer(args.product);
+    const reactionTip =
+      args.reactionSummary?.trim() &&
+      " Your logged symptoms and notes are used to personalize advice and spot patterns (see Today tab).";
+    return reactionTip ? `${base}${reactionTip}` : base;
+  }
+
+  const categoryOnly = swapCategoryFollowUpLabel(q0);
+  if (categoryOnly) {
+    const base = args.product
+      ? swapCategoryFollowUpAnswer(args.product, categoryOnly)
+      : `${SWAP_CATEGORY_GENERIC[categoryOnly] ?? "Scan a product and I can suggest swaps that match it."} Not medical advice.`;
+    const reactionTip =
+      args.reactionSummary?.trim() &&
+      " Your logged symptoms and notes are used to personalize advice and spot patterns (see Today tab).";
+    return reactionTip ? `${base}${reactionTip}` : base;
+  }
+
   // Try Supabase Edge Function first (LLM-backed), fallback to local curated answers.
   try {
     const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -746,6 +930,7 @@ export async function answerFoodQuestion(args: {
         const { data, error } = await supabase.functions.invoke("food-assistant", {
           body: {
             question: args.question,
+            history: args.chatHistory ?? [],
             product: args.product ?? null,
             analysis: args.analysis ?? null,
             profile: args.profile ?? null,
@@ -761,7 +946,14 @@ export async function answerFoodQuestion(args: {
     // ignore; use local answer
   }
   try {
-    return answerFoodQuestionLocal(args);
+    return answerFoodQuestionLocal({
+      question: args.question,
+      product: args.product,
+      analysis: args.analysis,
+      profile: args.profile ?? null,
+      reactionSummary: args.reactionSummary,
+      chatHistory: args.chatHistory,
+    });
   } catch {
     return "Ask me about an ingredient by name (e.g. “What is canola oil?” or “What does E415 mean?”), or scan a product to ask about it.";
   }

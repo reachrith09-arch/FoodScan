@@ -9,9 +9,13 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import Constants, { ExecutionEnvironment } from "expo-constants";
-import RevenueCatUI from "react-native-purchases-ui";
 import type { CustomerInfo } from "react-native-purchases";
-import { useSubscription } from "@/lib/revenuecat";
+import RevenueCatUI from "react-native-purchases-ui";
+import {
+  entitlementUnlocked,
+  syncCustomerInfoUntilEntitlementActive,
+  useSubscription,
+} from "@/lib/revenuecat";
 import { THEME } from "@/lib/theme";
 
 const RN_PURCHASES_MISSING =
@@ -23,31 +27,52 @@ const RN_PURCHASES_MISSING =
  */
 export default function PaywallTestScreen() {
   const router = useRouter();
-  const { refresh, purchasesAvailable, loading, revenueCatDiagnostic } = useSubscription();
+  const {
+    refresh,
+    applyCustomerInfo,
+    purchasesAvailable,
+    loading,
+    revenueCatDiagnostic,
+    paywallOffering,
+    entitlementId,
+  } = useSubscription();
+  const { lastOfferingsError } = revenueCatDiagnostic;
   const isDark = useColorScheme() === "dark";
   const bg = isDark ? "#000000" : "#f9fafb";
   const textColor = isDark ? "#ffffff" : "#111827";
   const mutedColor = isDark ? "#9ca3af" : "#6b7280";
 
   const handleDismiss = React.useCallback(() => {
-    refresh();
-    router.back();
+    void refresh().then(() => router.back());
   }, [router, refresh]);
 
   const handleRestoreCompleted = React.useCallback(
-    ({ customerInfo }: { customerInfo: CustomerInfo }) => {
-      if (customerInfo?.entitlements?.active?.pro) {
-        refresh();
+    async ({ customerInfo }: { customerInfo: CustomerInfo }) => {
+      applyCustomerInfo(customerInfo);
+      let info = customerInfo;
+      if (!entitlementUnlocked(info, entitlementId)) {
+        info = await syncCustomerInfoUntilEntitlementActive(entitlementId, applyCustomerInfo);
+      }
+      if (entitlementUnlocked(info, entitlementId)) {
+        await refresh();
         router.back();
       }
     },
-    [router, refresh],
+    [router, refresh, entitlementId, applyCustomerInfo],
   );
 
-  const handlePurchaseCompleted = React.useCallback(() => {
-    refresh();
-    router.back();
-  }, [router, refresh]);
+  const handlePurchaseCompleted = React.useCallback(
+    async ({ customerInfo }: { customerInfo: CustomerInfo }) => {
+      applyCustomerInfo(customerInfo);
+      let info = customerInfo;
+      if (!entitlementUnlocked(info, entitlementId)) {
+        info = await syncCustomerInfoUntilEntitlementActive(entitlementId, applyCustomerInfo);
+      }
+      await refresh();
+      router.back();
+    },
+    [router, refresh, applyCustomerInfo, entitlementId],
+  );
 
   if (loading) {
     return (
@@ -180,8 +205,31 @@ export default function PaywallTestScreen() {
 
   return (
     <View style={{ flex: 1 }}>
+      {__DEV__ && lastOfferingsError ? (
+        <View
+          style={{
+            paddingHorizontal: 16,
+            paddingVertical: 10,
+            backgroundColor: isDark ? "#1c1917" : "#fff7ed",
+            borderBottomWidth: 1,
+            borderBottomColor: isDark ? "#44403c" : "#fed7aa",
+          }}
+        >
+          <RNText style={{ fontSize: 12, color: mutedColor, lineHeight: 18 }}>
+            Offerings failed to load (often HTTP 404): use the{" "}
+            <RNText style={{ fontWeight: "700", color: textColor }}>iOS public SDK key</RNText> from
+            RevenueCat for this app, create an offering with packages, and match bundle ID.{"\n"}
+            <RNText style={{ fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 11 }}>
+              {lastOfferingsError}
+            </RNText>
+          </RNText>
+        </View>
+      ) : null}
       <RevenueCatUI.Paywall
-        options={{ displayCloseButton: true }}
+        options={{
+          displayCloseButton: true,
+          ...(paywallOffering ? { offering: paywallOffering } : {}),
+        }}
         onDismiss={handleDismiss}
         onRestoreCompleted={handleRestoreCompleted}
         onPurchaseCompleted={handlePurchaseCompleted}

@@ -11,9 +11,7 @@ import {
 } from "react-native";
 import {
   Camera,
-  Check,
   ImageIcon,
-  Pencil,
   Plus,
   Search,
   Trash2,
@@ -36,17 +34,24 @@ import {
   type MealItem,
 } from "@/lib/meal-score";
 import {
-  recognizeFoodsInImage,
+  recognizeMealFromImage,
   confidenceLabel,
   confidenceColor,
   ratioToPortionString,
-  type RecognizedFood,
+  isFoodRecognitionAvailable,
 } from "@/lib/recognize-food";
+import { resolveBase64ForVision } from "@/lib/vision-image";
 import { defaultPortionForFood } from "@/lib/meal-score";
 import type { ScanResult } from "@/types/food";
-import { env } from "@/env";
 
 const PORTION_PLACEHOLDER = "e.g. 100g, 1 cup, 1 serving";
+
+const ANALYZING_HINTS = [
+  "Reading your photo…",
+  "Finding foods in the picture…",
+  "Naming the meal and ingredients…",
+  "Estimating portions…",
+] as const;
 
 type ImagePickerModule = typeof import("expo-image-picker");
 let imagePickerModule: ImagePickerModule | null | undefined;
@@ -77,7 +82,7 @@ interface FoodEntry {
   portionRatio?: number;
 }
 
-type Step = "capture" | "recognizing" | "confirm" | "portion" | "calculating";
+type Step = "capture" | "preview" | "analyzing" | "review" | "calculating";
 
 function ConfidenceBadge({ confidence }: { confidence: number }) {
   const color = confidenceColor(confidence);
@@ -100,8 +105,15 @@ export default function PhotoScreen() {
   const [error, setError] = React.useState<string | null>(null);
   const mountedRef = React.useRef(true);
   const [foods, setFoods] = React.useState<FoodEntry[]>([]);
+  /** Overarching meal label (e.g. "Pasta with tomato sauce") — editable on confirm step */
+  const [dishSummary, setDishSummary] = React.useState("");
   const [isBlendedMeal, setIsBlendedMeal] = React.useState(false);
-  const hasSupabase = !!(env.EXPO_PUBLIC_SUPABASE_URL && env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
+  /** Cycles on the full-screen analyzing step so the wait feels intentional. */
+  const [analyzingHintIndex, setAnalyzingHintIndex] = React.useState(0);
+  /** From image picker; used when reading the file URI fails (common after crop). */
+  const [pendingPickerBase64, setPendingPickerBase64] = React.useState<string | null>(null);
+  const visionEnabled = isFoodRecognitionAvailable();
+  const recognitionGen = React.useRef(0);
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -110,6 +122,15 @@ export default function PhotoScreen() {
     };
   }, []);
 
+  React.useEffect(() => {
+    if (step !== "analyzing") return;
+    setAnalyzingHintIndex(0);
+    const t = setInterval(() => {
+      setAnalyzingHintIndex((i) => (i + 1) % ANALYZING_HINTS.length);
+    }, 2400);
+    return () => clearInterval(t);
+  }, [step]);
+
   const isDark = useColorScheme() === "dark";
   const insets = useSafeAreaInsets();
   const bgColor = isDark ? THEME.darkBg : THEME.bgLightTop;
@@ -117,15 +138,21 @@ export default function PhotoScreen() {
   const borderColor = isDark ? THEME.borderDark : THEME.borderLight;
   const textColor = isDark ? "#f4f4f5" : THEME.darkGrey;
 
-  // ── AI recognition (must be before processImage) ─────────────────────────────
+  // ── AI recognition ───────────────────────────────────────────────────────────
 
   const runRecognition = React.useCallback(async (base64: string) => {
+    const gen = ++recognitionGen.current;
     setLoading(true);
     setError(null);
     try {
-      const recognized: RecognizedFood[] = await recognizeFoodsInImage(base64);
-      if (!mountedRef.current) return;
+      const { dishSummary: summary, foods: recognized, visionError } = await recognizeMealFromImage(base64);
+      if (!mountedRef.current || gen !== recognitionGen.current) return;
+      const summaryText = summary?.trim() ?? "";
+      setDishSummary(summaryText);
       if (recognized.length > 0) {
+        if (visionError && __DEV__) {
+          console.warn("[photo] vision:", visionError);
+        }
         const blended = recognized.some((f) => f.isBlended);
         const allDrinks = recognized.every((f) => f.isDrink);
         const totalAmount = allDrinks ? 400 : 400;
@@ -141,40 +168,81 @@ export default function PhotoScreen() {
             portionRatio: f.portionRatio,
           })),
         );
-        setStep("confirm");
+        setStep("review");
       } else {
+        setIsBlendedMeal(false);
         setFoods([{ id: `food-${Date.now()}`, name: "", portion: "1 serving" }]);
-        setStep("portion");
+        setStep("review");
+        const baseMsg = summaryText
+          ? "Meal name only — add ingredients below or Re-analyze."
+          : "No ingredients detected. Add below or Re-analyze.";
+        setError(visionError ? `${baseMsg} ${visionError}` : baseMsg);
       }
     } catch {
-      if (mountedRef.current) {
+      if (mountedRef.current && gen === recognitionGen.current) {
+        setDishSummary("");
         setFoods([{ id: `food-${Date.now()}`, name: "", portion: "1 serving" }]);
-        setStep("portion");
-        setError("AI recognition failed. Please enter the food manually.");
+        setStep("review");
+        setError("Scan failed. Add foods manually or try Re-analyze.");
       }
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (mountedRef.current && gen === recognitionGen.current) setLoading(false);
     }
   }, []);
 
-  // ── Image capture ───────────────────────────────────────────────────────────
+  const startAiAnalysis = React.useCallback(async () => {
+    if (!imageUri) return;
+    setStep("analyzing");
+    setError(null);
+    const resolved = await resolveBase64ForVision(imageUri, pendingPickerBase64);
+    if (!mountedRef.current) return;
+    const b64 = resolved.ok ? resolved.base64 : null;
+    setImageBase64(b64);
+    setFoods([]);
+    setDishSummary("");
+    setIsBlendedMeal(false);
+    if (!b64) {
+      setStep("preview");
+      setError(
+        resolved.reason === "heic"
+          ? "This photo is HEIC, which the AI cannot read. On iPhone: Settings → Camera → Formats → Most Compatible."
+          : "Could not read this image for analysis. Try Retake or another photo.",
+      );
+      return;
+    }
+    runRecognition(b64);
+  }, [imageUri, pendingPickerBase64, runRecognition]);
 
-  const processImage = React.useCallback(
-    async (uri: string, base64: string | null) => {
+  // ── Image capture → preview (vision) or review (manual) ─────────────────────
+
+  const handlePickedAsset = React.useCallback(
+    (uri: string, pickerBase64: string | null) => {
       setImageUri(uri);
-      setImageBase64(base64 ?? null);
+      setError(null);
       setFoods([]);
+      setDishSummary("");
       setIsBlendedMeal(false);
-      if (hasSupabase && base64) {
-        setStep("recognizing");
-        runRecognition(base64);
-      } else {
-        setStep("portion");
-        setFoods([{ id: `food-${Date.now()}`, name: "", portion: "1 serving" }]);
+      if (visionEnabled) {
+        setPendingPickerBase64(pickerBase64?.trim() || null);
+        setImageBase64(null);
+        setStep("preview");
+        return;
       }
+      setPendingPickerBase64(null);
+      setImageBase64(null);
+      setStep("review");
+      setFoods([{ id: `food-${Date.now()}`, name: "", portion: "1 serving" }]);
     },
-    [hasSupabase, runRecognition],
+    [visionEnabled],
   );
+
+  const retakeFromPreview = React.useCallback(() => {
+    setImageUri(null);
+    setPendingPickerBase64(null);
+    setImageBase64(null);
+    setStep("capture");
+    setError(null);
+  }, []);
 
   const takePhoto = React.useCallback(async () => {
     if (capturing || loading) return;
@@ -192,13 +260,13 @@ export default function PhotoScreen() {
     setCapturing(true);
     try {
       const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: true,
+        allowsEditing: false,
         quality: 0.85,
         base64: true,
       });
       if (!mountedRef.current) return;
       if (!result.canceled && result.assets[0]) {
-        await processImage(result.assets[0].uri, result.assets[0].base64 ?? null);
+        handlePickedAsset(result.assets[0].uri, result.assets[0].base64 ?? null);
       }
     } catch {
       if (mountedRef.current) {
@@ -207,7 +275,7 @@ export default function PhotoScreen() {
     } finally {
       if (mountedRef.current) setCapturing(false);
     }
-  }, [capturing, loading, processImage]);
+  }, [capturing, loading, handlePickedAsset]);
 
   const pickImage = React.useCallback(async () => {
     if (loading) return;
@@ -225,36 +293,46 @@ export default function PhotoScreen() {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
-        allowsEditing: true,
+        allowsEditing: false,
         quality: 0.85,
         base64: true,
       });
       if (!mountedRef.current) return;
       if (!result.canceled && result.assets[0]) {
-        await processImage(result.assets[0].uri, result.assets[0].base64 ?? null);
+        handlePickedAsset(result.assets[0].uri, result.assets[0].base64 ?? null);
       }
     } catch {
       if (mountedRef.current) {
         setError("Could not select image. Please try again.");
       }
     }
-  }, [loading, processImage]);
+  }, [loading, handlePickedAsset]);
 
   const reAnalyze = () => {
     if (imageBase64) {
-      setStep("recognizing");
+      setAnalyzingHintIndex(0);
+      setStep("analyzing");
       runRecognition(imageBase64);
     }
   };
 
-  // ── Food entry editing ──────────────────────────────────────────────────────
-
-  const confirmGuess = (confirmed: boolean) => {
-    setStep("portion");
-    if (!confirmed && foods.length === 0) {
-      setFoods([{ id: `food-${Date.now()}`, name: "", portion: "1 serving" }]);
+  const cancelAnalyzing = () => {
+    recognitionGen.current += 1;
+    setLoading(false);
+    setError(null);
+    if (imageUri && visionEnabled) {
+      setStep("preview");
+    } else {
+      setStep("capture");
+      setImageUri(null);
+      setPendingPickerBase64(null);
+      setImageBase64(null);
+      setFoods([]);
+      setDishSummary("");
     }
   };
+
+  // ── Food entry editing ──────────────────────────────────────────────────────
 
   const addFood = () => {
     setFoods((prev) => [
@@ -291,7 +369,7 @@ export default function PhotoScreen() {
         if (!product) {
           setError(`Could not find "${f.name}" in the database. Try a different name or remove it.`);
           setLoading(false);
-          setStep("portion");
+          setStep("review");
           return;
         }
         const grams = parsePortionToGrams(f.portion) ?? 100;
@@ -320,7 +398,7 @@ export default function PhotoScreen() {
     } catch {
       setError("Something went wrong. Please try again.");
       setLoading(false);
-      setStep("portion");
+      setStep("review");
     }
   };
 
@@ -342,10 +420,10 @@ export default function PhotoScreen() {
         Scan your food
       </Text>
       <Text style={[styles.subheading, { color: THEME.mutedGrey }]}>
-        AI identifies each ingredient, estimates portions, and computes a composite health score for the whole meal.
+        Take a picture, submit it for AI analysis, then confirm the meal — add or remove ingredients before your score.
       </Text>
 
-      {/* Primary: Take Photo */}
+      {/* Primary: camera → preview → analyze → confirm */}
       <Button
         onPress={takePhoto}
         disabled={capturing || loading}
@@ -357,7 +435,7 @@ export default function PhotoScreen() {
           <Camera size={22} color="#fff" style={{ marginRight: 10 }} />
         )}
         <Text style={styles.takePhotoLabel}>
-          {capturing ? "Opening camera…" : "Take a picture"}
+          {capturing ? "Opening camera…" : "Scan food"}
         </Text>
       </Button>
 
@@ -381,8 +459,11 @@ export default function PhotoScreen() {
         onPress={() => {
           setError(null);
           setImageUri(null);
+          setPendingPickerBase64(null);
+          setImageBase64(null);
+          setDishSummary("");
           setFoods([{ id: `food-${Date.now()}`, name: "", portion: "" }]);
-          setStep("portion");
+          setStep("review");
         }}
         style={({ pressed }) => [
           styles.searchBtn,
@@ -401,25 +482,86 @@ export default function PhotoScreen() {
     </>
   );
 
-  const renderRecognizingStep = () => (
-    <View style={styles.centred}>
-      {imageUri && (
-        <View style={[styles.photoPreview, { backgroundColor: cardBg, borderColor }]}>
+  /** After pick: user submits when ready; then we decode + call vision. */
+  const renderPreviewStep = () => (
+    <>
+      <Text style={[styles.heading, { color: textColor, marginBottom: 8 }]}>Your photo</Text>
+      <Text style={[styles.subheading, { color: THEME.mutedGrey, marginBottom: 16 }]}>
+        Submit when you&apos;re happy with the shot. We&apos;ll match it to typical meals like this, list ingredients, then you confirm or edit.
+      </Text>
+      {imageUri ? (
+        <View style={[styles.photoPreview, { backgroundColor: cardBg, borderColor, marginBottom: 20 }]}>
           <Image source={{ uri: imageUri }} style={styles.photoImage} resizeMode="cover" />
         </View>
-      )}
-      <ActivityIndicator color={THEME.primary} size="large" style={{ marginTop: 24 }} />
-      <Text style={[styles.recognizingLabel, { color: textColor }]}>
-        AI is identifying your food…
-      </Text>
-      <Text style={{ color: THEME.mutedGrey, fontSize: 13, textAlign: "center" }}>
-        Detecting items · estimating portions · checking blend
-      </Text>
-    </View>
+      ) : null}
+      {error ? <Text style={[styles.errorText, { marginBottom: 12 }]}>{error}</Text> : null}
+      <Button
+        onPress={() => void startAiAnalysis()}
+        style={[styles.takePhotoButton, THEME.shadowButton]}
+      >
+        <UtensilsCrossed size={22} color="#fff" style={{ marginRight: 10 }} />
+        <Text style={styles.takePhotoLabel}>Analyze meal</Text>
+      </Button>
+      <Pressable
+        onPress={retakeFromPreview}
+        style={({ pressed }) => [
+          styles.secondaryBtn,
+          { borderColor, marginTop: 12, opacity: pressed ? 0.85 : 1 },
+        ]}
+      >
+        <Camera size={18} color={THEME.primary} style={{ marginRight: 8 }} />
+        <Text style={{ color: THEME.primary, fontSize: 16, fontWeight: "500" }}>Retake / choose another</Text>
+      </Pressable>
+    </>
   );
 
-  const renderConfirmStep = () => {
-    const hasBlend = foods.some((f) => f.isBlended);
+  /** Full-screen loading: photo decode + vision API — stays up until results are applied. */
+  const renderAnalyzingScreen = () => {
+    const hint = ANALYZING_HINTS[analyzingHintIndex % ANALYZING_HINTS.length];
+    return (
+      <View
+        style={[
+          styles.analyzingRoot,
+          {
+            backgroundColor: bgColor,
+            paddingTop: insets.top + 20,
+            paddingBottom: insets.bottom + 28,
+          },
+        ]}
+      >
+        <Text style={[styles.analyzingScreenTitle, { color: textColor }]}>Analyzing your meal</Text>
+        <Text style={[styles.analyzingScreenKicker, { color: THEME.mutedGrey }]}>
+          Matching your plate to typical meals and ingredients
+        </Text>
+
+        {imageUri ? (
+          <View style={[styles.analyzingPhotoCard, { borderColor }]}>
+            <Image source={{ uri: imageUri }} style={styles.analyzingPhotoImage} resizeMode="cover" />
+            <View style={styles.analyzingPhotoOverlay}>
+              <ActivityIndicator color="#fff" size="large" />
+            </View>
+          </View>
+        ) : (
+          <View style={[styles.analyzingPhotoPlaceholder, { borderColor }]}>
+            <ActivityIndicator color={THEME.primary} size="large" />
+          </View>
+        )}
+
+        <Text style={[styles.analyzingHintLine, { color: textColor }]}>{hint}</Text>
+        <Text style={[styles.analyzingSubtitle, { color: THEME.mutedGrey }]}>
+          Next you&apos;ll confirm it&apos;s correct, remove anything wrong, and add what we missed.
+        </Text>
+
+        <Button variant="ghost" style={styles.analyzingCancel} onPress={cancelAnalyzing}>
+          <Text style={{ color: THEME.mutedGrey }}>Cancel</Text>
+        </Button>
+      </View>
+    );
+  };
+
+  /** Edit AI-filled meal + ingredients → composite score */
+  const renderReviewStep = () => {
+    const hasBlend = isBlendedMeal || foods.some((f) => f.isBlended);
     const isMultiItem = foods.length > 1;
     return (
       <>
@@ -429,181 +571,139 @@ export default function PhotoScreen() {
           </View>
         )}
 
+        {!visionEnabled ? (
+          <View
+            style={[
+              styles.visionConfigBanner,
+              { backgroundColor: isDark ? "#3f2a1a" : "#fff7ed", borderColor: isDark ? "#92400e" : "#fdba74" },
+            ]}
+          >
+            <Text style={{ color: isDark ? "#fed7aa" : "#9a3412", fontSize: 13, lineHeight: 19 }}>
+              Photo AI is off: add{" "}
+              <Text style={{ fontWeight: "700" }}>EXPO_PUBLIC_OPENAI_API_KEY</Text> or{" "}
+              <Text style={{ fontWeight: "700" }}>EXPO_PUBLIC_SUPABASE_URL</Text> +{" "}
+              <Text style={{ fontWeight: "700" }}>EXPO_PUBLIC_SUPABASE_ANON_KEY</Text> to{" "}
+              <Text style={{ fontWeight: "700" }}>.env</Text> or Doppler, then restart Metro with{" "}
+              <Text style={{ fontWeight: "700" }}>--clear</Text>. Rebuild the dev client after changing{" "}
+              <Text style={{ fontWeight: "700" }}>app.config</Text>.
+            </Text>
+          </View>
+        ) : null}
+
+        <Text style={[styles.sectionTitle, { color: textColor }]}>Confirm your meal</Text>
+        <Text style={{ color: THEME.mutedGrey, fontSize: 13, marginBottom: 14, lineHeight: 19 }}>
+          Is this right? Remove what you didn&apos;t use, add anything we missed, then get your score.
+        </Text>
+
         {(hasBlend || isMultiItem) && (
           <View style={[styles.blendBanner, { backgroundColor: isDark ? "#1a2e1a" : "#f0fdf4", borderColor: "#16a34a44" }]}>
             <Zap size={15} color="#16a34a" style={{ marginRight: 6 }} />
             <Text style={{ color: "#16a34a", fontSize: 13, flex: 1 }}>
               {hasBlend
-                ? "Blended meal detected — score will be a weighted combination of all components."
-                : "Composite meal — the health score combines all items by portion size."}
+                ? "Score blends listed ingredients by portion."
+                : "Score weights each row by portion."}
             </Text>
           </View>
         )}
 
-        <Text style={[styles.sectionTitle, { color: textColor }]}>
-          Detected foods
+        <View
+          style={[
+            styles.mealCard,
+            { backgroundColor: isDark ? "#27272a" : "#f4f4f5", borderColor },
+          ]}
+        >
+          <Text style={{ color: THEME.mutedGrey, fontSize: 12, marginBottom: 6, fontWeight: "600" }}>Meal</Text>
+          <Input
+            value={dishSummary}
+            onChangeText={setDishSummary}
+            placeholder="Meal name"
+            editable={!loading}
+            style={[
+              styles.input,
+              styles.mealNameInput,
+              isDark && { borderColor: THEME.borderDark, color: "#f4f4f5", backgroundColor: "#1a1a1a" },
+            ]}
+            placeholderTextColor={isDark ? "#71717a" : undefined}
+          />
+        </View>
+
+        {visionEnabled && imageBase64 ? (
+          <Pressable
+            onPress={reAnalyze}
+            style={({ pressed }) => [
+              styles.addBtn,
+              { borderStyle: "solid", marginBottom: 8, opacity: pressed ? 0.85 : 1 },
+            ]}
+          >
+            <UtensilsCrossed size={16} color={THEME.primary} />
+            <Text style={{ color: THEME.primary, fontSize: 14, fontWeight: "600" }}>Re-analyze photo</Text>
+          </Pressable>
+        ) : null}
+
+        <Text style={[styles.ingredientsSectionTitle, { color: textColor }]}>Ingredients</Text>
+        <Text style={{ color: THEME.mutedGrey, fontSize: 12, marginBottom: 10 }}>
+          Trash a row to remove · edit portions · Add ingredient for anything extra.
         </Text>
-        <Text style={{ color: THEME.mutedGrey, fontSize: 13, marginBottom: 12 }}>
-          Review each item. Did we miss anything? You can add it on the next screen — the composite score includes every item.
-        </Text>
+
+        {foods.length === 0 ? (
+          <Text style={{ color: THEME.mutedGrey, fontSize: 13, marginBottom: 12 }}>
+            No ingredients yet — tap &quot;Add ingredient&quot; below.
+          </Text>
+        ) : null}
 
         {foods.map((f) => (
           <View
             key={f.id}
-            style={[
-              styles.detectedCard,
-              { backgroundColor: cardBg, borderColor },
-            ]}
+            style={[styles.ingredientBlock, { backgroundColor: cardBg, borderColor }]}
           >
-            <View style={styles.detectedRow}>
-              <Text style={[styles.detectedName, { color: textColor }]}>{f.name}</Text>
+            <View style={styles.ingredientNameRow}>
+              <Input
+                value={f.name}
+                onChangeText={(text) => {
+                  const isDrinkGuess = defaultPortionForFood(text) === "250ml";
+                  const newPortion = f.portion === "" ? defaultPortionForFood(text) : f.portion;
+                  updateFood(f.id, {
+                    name: text,
+                    isDrink: isDrinkGuess,
+                    portion: newPortion,
+                  });
+                }}
+                placeholder="Ingredient name"
+                editable={!loading}
+                style={[
+                  styles.input,
+                  styles.ingredientNameInput,
+                  isDark && { borderColor: THEME.borderDark, color: "#f4f4f5" },
+                ]}
+              />
+              <Pressable
+                onPress={() => removeFood(f.id)}
+                style={styles.trashBesideName}
+                hitSlop={10}
+                accessibilityLabel="Remove ingredient"
+              >
+                <Trash2 size={20} color={THEME.mutedGrey} />
+              </Pressable>
+            </View>
+            <View style={styles.badgeRow}>
               {f.isDrink && (
                 <View style={[styles.drinkTag, { backgroundColor: isDark ? "#1e3a5f" : "#dbeafe" }]}>
                   <Text style={{ color: "#2563eb", fontSize: 11, fontWeight: "600" }}>DRINK</Text>
                 </View>
               )}
-              {f.isBlended && (
-                <View style={[styles.blendTag, { backgroundColor: isDark ? "#1a2e1a" : "#dcfce7" }]}>
-                  <Text style={{ color: "#16a34a", fontSize: 11, fontWeight: "600" }}>BLEND</Text>
-                </View>
-              )}
+              {f.confidence !== undefined && <ConfidenceBadge confidence={f.confidence} />}
             </View>
-            <View style={styles.detectedMeta}>
-              {f.confidence !== undefined && (
-                <ConfidenceBadge confidence={f.confidence} />
-              )}
-              <Text style={{ color: THEME.mutedGrey, fontSize: 12 }}>
-                ~{f.portion}
-              </Text>
-            </View>
-          </View>
-        ))}
-
-        <View style={styles.confirmButtons}>
-          <Button onPress={() => confirmGuess(true)} style={[styles.confirmBtn, THEME.shadowButton]}>
-            <Check size={18} color="#fff" style={{ marginRight: 6 }} />
-            <Text style={{ color: "#fff", fontWeight: "600" }}>Yes, looks right</Text>
-          </Button>
-          <Pressable
-            onPress={() => {
-              confirmGuess(false);
-              addFood();
-            }}
-            style={({ pressed }) => [
-              styles.addMissedBtn,
-              { borderColor, opacity: pressed ? 0.8 : 1 },
-            ]}
-          >
-            <Plus size={18} color={THEME.primary} style={{ marginRight: 6 }} />
-            <Text style={{ color: THEME.primary, fontWeight: "600" }}>
-              Add something we missed
-            </Text>
-          </Pressable>
-          <Button
-            variant="outline"
-            onPress={() => confirmGuess(false)}
-            style={[styles.editBtn, { borderColor }]}
-          >
-            <Pencil size={18} color={THEME.primary} style={{ marginRight: 6 }} />
-            <Text style={{ color: THEME.primary, fontWeight: "600" }}>Edit items</Text>
-          </Button>
-          {hasSupabase && imageBase64 && (
-            <Pressable
-              onPress={reAnalyze}
-              style={({ pressed }) => [styles.reAnalyzeBtn, { opacity: pressed ? 0.7 : 1 }]}
-            >
-              <Text style={{ color: THEME.mutedGrey, fontSize: 13 }}>Re-scan image</Text>
-            </Pressable>
-          )}
-        </View>
-      </>
-    );
-  };
-
-  const renderPortionStep = () => {
-    const hasBlend = isBlendedMeal || foods.some((f) => f.isBlended);
-    return (
-      <>
-        {imageUri && (
-          <View style={[styles.photoPreview, { backgroundColor: cardBg, borderColor }]}>
-            <Image source={{ uri: imageUri }} style={styles.photoImage} resizeMode="cover" />
-          </View>
-        )}
-
-        {hasBlend && (
-          <View style={[styles.blendBanner, { backgroundColor: isDark ? "#1a2e1a" : "#f0fdf4", borderColor: "#16a34a44" }]}>
-            <Zap size={15} color="#16a34a" style={{ marginRight: 6 }} />
-            <Text style={{ color: "#16a34a", fontSize: 13, flex: 1 }}>
-              Blended meal — health score is a weighted combination of all components.
-            </Text>
-          </View>
-        )}
-
-        <Text style={[styles.sectionTitle, { color: textColor }]}>
-          Confirm foods &amp; drinks
-        </Text>
-        <Text style={{ color: THEME.mutedGrey, fontSize: 13, marginBottom: 12 }}>
-          Edit names or amounts. Add anything the scan missed — the composite score includes every item.
-        </Text>
-
-        {foods.map((f) => (
-          <View
-            key={f.id}
-            style={[styles.foodRow, { backgroundColor: cardBg, borderColor }]}
-          >
-            <View style={styles.foodInputs}>
-              <View style={styles.nameRow}>
-                <Input
-                  value={f.name}
-                  onChangeText={(text) => {
-                    const isDrinkGuess = defaultPortionForFood(text) === "250ml";
-                    // Auto-set portion default when name is typed and portion is empty
-                    const newPortion =
-                      f.portion === "" ? defaultPortionForFood(text) : f.portion;
-                    updateFood(f.id, {
-                      name: text,
-                      isDrink: isDrinkGuess,
-                      portion: newPortion,
-                    });
-                  }}
-                  placeholder="Food or drink name"
-                  editable={!loading}
-                  style={[
-                    styles.input,
-                    styles.foodName,
-                    isDark && { borderColor: THEME.borderDark, color: "#f4f4f5" },
-                  ]}
-                />
-                <View style={styles.badgeRow}>
-                  {f.isDrink && (
-                    <View style={[styles.drinkTag, { backgroundColor: isDark ? "#1e3a5f" : "#dbeafe" }]}>
-                      <Text style={{ color: "#2563eb", fontSize: 11, fontWeight: "600" }}>DRINK</Text>
-                    </View>
-                  )}
-                  {f.confidence !== undefined && (
-                    <ConfidenceBadge confidence={f.confidence} />
-                  )}
-                </View>
-              </View>
-              <Input
-                value={f.portion}
-                onChangeText={(text) => updateFood(f.id, { portion: text })}
-                placeholder={f.isDrink ? "e.g. 250ml, 1 can, 1 glass" : PORTION_PLACEHOLDER}
-                editable={!loading}
-                style={[
-                  styles.input,
-                  styles.portionInput,
-                  isDark && { borderColor: THEME.borderDark, color: "#f4f4f5" },
-                ]}
-              />
-            </View>
-            <Pressable
-              onPress={() => removeFood(f.id)}
-              style={styles.removeBtn}
-              hitSlop={8}
-            >
-              <Trash2 size={18} color={THEME.mutedGrey} />
-            </Pressable>
+            <Input
+              value={f.portion}
+              onChangeText={(text) => updateFood(f.id, { portion: text })}
+              placeholder={f.isDrink ? "e.g. 250ml, 1 can, 1 glass" : PORTION_PLACEHOLDER}
+              editable={!loading}
+              style={[
+                styles.input,
+                styles.portionInput,
+                isDark && { borderColor: THEME.borderDark, color: "#f4f4f5" },
+              ]}
+            />
           </View>
         ))}
 
@@ -614,28 +714,20 @@ export default function PhotoScreen() {
             { borderColor, opacity: pressed ? 0.8 : 1 },
           ]}
         >
-          <Plus size={16} color={THEME.primary} />
-          <Text style={{ color: THEME.primary, fontSize: 14, fontWeight: "500" }}>
-            Add something we missed
-          </Text>
+          <Plus size={18} color={THEME.primary} />
+          <Text style={{ color: THEME.primary, fontSize: 15, fontWeight: "600" }}>Add ingredient</Text>
         </Pressable>
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-        {/* THE SEARCH / SUBMIT BUTTON */}
         <Button
           style={[styles.searchScoreBtn, THEME.shadowButton, !canCalculate && { opacity: 0.5 }]}
           onPress={calculateMealScore}
           disabled={!canCalculate}
         >
           <Search size={18} color="#fff" style={{ marginRight: 8 }} />
-          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 16 }}>
-            Search &amp; get health score
-          </Text>
+          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 16 }}>Get health score</Text>
         </Button>
-        <Text style={{ color: THEME.mutedGrey, fontSize: 12, textAlign: "center", marginTop: 6 }}>
-          Looks up each item and computes a composite score weighted by portion
-        </Text>
       </>
     );
   };
@@ -657,6 +749,10 @@ export default function PhotoScreen() {
     </View>
   );
 
+  if (step === "analyzing") {
+    return <View style={[styles.container, { backgroundColor: bgColor }]}>{renderAnalyzingScreen()}</View>;
+  }
+
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: bgColor }]}
@@ -668,18 +764,15 @@ export default function PhotoScreen() {
     >
       <View style={styles.content}>
         {step === "capture" && renderCaptureStep()}
-        {step === "recognizing" && renderRecognizingStep()}
-        {step === "confirm" && renderConfirmStep()}
-        {step === "portion" && renderPortionStep()}
+        {step === "preview" && renderPreviewStep()}
+        {step === "review" && renderReviewStep()}
         {step === "calculating" && renderCalculatingStep()}
 
-        <Button
-          variant="ghost"
-          style={styles.cancelBtn}
-          onPress={() => router.back()}
-        >
-          <Text style={{ color: THEME.mutedGrey }}>Cancel</Text>
-        </Button>
+        {step !== "calculating" ? (
+          <Button variant="ghost" style={styles.cancelBtn} onPress={() => router.back()}>
+            <Text style={{ color: THEME.mutedGrey }}>Cancel</Text>
+          </Button>
+        ) : null}
       </View>
     </ScrollView>
   );
@@ -689,6 +782,68 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { flex: 1, paddingHorizontal: 20 },
   centred: { alignItems: "center", paddingVertical: 32 },
+
+  analyzingRoot: {
+    flex: 1,
+    alignItems: "center",
+    paddingHorizontal: 24,
+  },
+  analyzingScreenTitle: {
+    fontSize: 22,
+    fontWeight: "700",
+    textAlign: "center",
+    letterSpacing: -0.3,
+  },
+  analyzingScreenKicker: {
+    fontSize: 14,
+    marginTop: 6,
+    marginBottom: 20,
+    textAlign: "center",
+  },
+  analyzingPhotoCard: {
+    width: "100%",
+    maxWidth: 340,
+    aspectRatio: 4 / 3,
+    borderRadius: 16,
+    overflow: "hidden",
+    borderWidth: 1,
+    backgroundColor: "#000",
+  },
+  analyzingPhotoImage: {
+    width: "100%",
+    height: "100%",
+  },
+  analyzingPhotoOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.52)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  analyzingPhotoPlaceholder: {
+    width: "100%",
+    maxWidth: 340,
+    aspectRatio: 4 / 3,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.06)",
+  },
+  analyzingHintLine: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginTop: 22,
+    textAlign: "center",
+    paddingHorizontal: 16,
+  },
+  analyzingSubtitle: {
+    fontSize: 13,
+    marginTop: 10,
+    textAlign: "center",
+    lineHeight: 19,
+    paddingHorizontal: 20,
+  },
+  analyzingCancel: { marginTop: 28 },
 
   iconCircle: {
     width: 72,
@@ -760,6 +915,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 14,
   },
+  visionConfigBanner: {
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 14,
+  },
 
   sectionTitle: {
     fontSize: 17,
@@ -767,20 +928,47 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
 
-  detectedCard: {
+  mealCard: {
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 14,
+  },
+  mealNameInput: {
+    minHeight: 46,
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  ingredientsSectionTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    marginTop: 4,
+    marginBottom: 0,
+  },
+  ingredientBlock: {
     padding: 12,
     borderRadius: 12,
     borderWidth: 1,
-    marginBottom: 8,
-    gap: 6,
+    marginBottom: 10,
+    gap: 8,
   },
-  detectedRow: {
+  ingredientNameRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    flexWrap: "wrap",
   },
-  detectedName: { fontSize: 15, fontWeight: "600", flex: 1 },
+  ingredientNameInput: {
+    flex: 1,
+    minHeight: 44,
+    minWidth: 0,
+  },
+  trashBesideName: {
+    padding: 10,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
   blendTag: {
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -797,13 +985,6 @@ const styles = StyleSheet.create({
     gap: 6,
     flexWrap: "wrap",
   },
-  detectedMeta: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flexWrap: "wrap",
-  },
-
   badge: {
     flexDirection: "row",
     alignItems: "center",
@@ -816,51 +997,8 @@ const styles = StyleSheet.create({
   badgeDot: { width: 6, height: 6, borderRadius: 3 },
   badgeText: { fontSize: 12, fontWeight: "600" },
 
-  confirmButtons: { gap: 10, marginTop: 16 },
-  confirmBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: THEME.primary,
-    paddingVertical: 14,
-    borderRadius: 12,
-  },
-  addMissedBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1.5,
-  },
-  editBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1.5,
-  },
-  reAnalyzeBtn: {
-    alignItems: "center",
-    paddingVertical: 8,
-  },
-
-  foodRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 8,
-    padding: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 10,
-  },
-  foodInputs: { flex: 1, gap: 8 },
-  nameRow: { gap: 6 },
   input: { borderWidth: 1, borderRadius: 10 },
-  foodName: { minHeight: 40 },
   portionInput: { minHeight: 40 },
-  removeBtn: { padding: 8, marginTop: 6 },
 
   addBtn: {
     flexDirection: "row",

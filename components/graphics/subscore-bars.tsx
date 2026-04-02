@@ -14,7 +14,7 @@ interface BarProps {
 }
 
 const LABEL_ICONS: Record<string, React.ComponentType<{ size?: number; color?: string }>> = {
-  "Allergen risk": AlertTriangle,
+  "Allergen safety": AlertTriangle,
   "Nutrition": Flame,
   "Additives": FlaskConical,
   "Processing": Cog,
@@ -73,11 +73,12 @@ export function SubscoreBars({
   const additives = Number(s.additives ?? 0);
   const processing = Number(s.processing ?? 0);
   const dietFit = Number(s.dietFit ?? 0);
-  const allergenRisk = Math.round(100 - allergens);
+  // Same polarity as scoring.ts: higher = better. (Previously we showed 100−safety as “risk”
+  // but used the same green/yellow/red scale as other rows, so a safe meal looked dangerously red.)
 
   return (
     <View style={styles.container}>
-      <Bar label="Allergen risk" value={allergenRisk} isDark={isDark} />
+      <Bar label="Allergen safety" value={Math.round(allergens)} isDark={isDark} />
       <Bar label="Nutrition" value={nutrition} isDark={isDark} />
       <Bar label="Additives" value={additives} isDark={isDark} />
       <Bar label="Processing" value={processing} isDark={isDark} />

@@ -5,12 +5,12 @@
  */
 import type { ProductResult } from "@/types/food";
 import { productMatchesQuery } from "@/lib/open-food-facts";
+import { supabase } from "@/lib/supabase";
 
 export async function lookupProductOnline(
   query: string,
   barcode?: string
 ): Promise<ProductResult | null> {
-  const { supabase } = await import("@/lib/supabase");
   if (!supabase) return null;
 
   const trimmed = query.trim();

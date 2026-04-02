@@ -129,10 +129,11 @@ export interface DietCompatibilityResult {
 }
 
 export interface Subscores {
+  /** How well the product matches allergen safety for the profile (higher = safer; critical allergy hit → very low). */
   allergens: number; // 0-100
   nutrition: number; // 0-100
-  additives: number; // 0-100
-  processing: number; // 0-100
+  additives: number; // 0-100 (higher = fewer additive concerns)
+  processing: number; // 0-100 (higher = less ultra-processed)
   dietFit: number; // 0-100
 }
 

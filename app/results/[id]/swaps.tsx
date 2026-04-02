@@ -9,10 +9,15 @@ import { ProFeaturePaywall } from "@/components/pro-feature-paywall";
 import { ResultHeader } from "@/components/result-header";
 import { Text } from "@/components/ui/text";
 import { FoodAssistantChat } from "@/components/food-assistant-chat";
-import { getLocalSwapTips, makeSwapScanResult } from "@/lib/swaps";
+import {
+  fetchCandidatesForSwapTip,
+  findProductForSwapTip,
+  getLocalSwapTips,
+  hydrateProductForSwapNavigation,
+  makeSwapScanResult,
+  pickSwapProductFromCandidates,
+} from "@/lib/swaps";
 import type { LocalSwapTip } from "@/lib/swaps";
-import { searchProductsUnified } from "@/lib/search-products-online";
-import { analyzeProduct } from "@/lib/scoring";
 import { getHealthProfile } from "@/lib/storage";
 import { addToScanHistory } from "@/lib/storage";
 import { useScanResult } from "@/lib/use-scan-result";
@@ -28,6 +33,9 @@ interface RecommendedProduct {
   tipSuggestion: string;
 }
 
+/** One row per swap tip: catalog match when found, else the tip text (opens search). */
+type AlternativeRow = { tip: LocalSwapTip; productRec: RecommendedProduct | null };
+
 export default function SwapsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -37,6 +45,20 @@ export default function SwapsScreen() {
   const textMuted = isDark ? { color: "#a1a1aa" as const } : undefined;
   const { isPro, showPaywall, refresh: refreshSubscription } = useSubscription();
   const { result, loading } = useScanResult(id);
+
+  const openSwapProductResult = React.useCallback(
+    async (product: ProductResult) => {
+      const p = await getHealthProfile();
+      const hydrated = await hydrateProductForSwapNavigation(product);
+      const scan = makeSwapScanResult(hydrated, p);
+      await addToScanHistory(scan);
+      const path = `/results/${encodeURIComponent(scan.id)}`;
+      requestAnimationFrame(() => {
+        router.push(path);
+      });
+    },
+    [router],
+  );
 
   useFocusEffect(
     React.useCallback(() => {
@@ -48,6 +70,8 @@ export default function SwapsScreen() {
   const [localTips, setLocalTips] = React.useState<LocalSwapTip[]>([]);
   const [recommended, setRecommended] = React.useState<RecommendedProduct[]>([]);
   const [loadingRecs, setLoadingRecs] = React.useState(true);
+  /** Tip row key while resolving catalog product for navigation */
+  const [openingTipKey, setOpeningTipKey] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     getHealthProfile().then(setProfile);
@@ -59,14 +83,17 @@ export default function SwapsScreen() {
   }, [result]);
 
   React.useEffect(() => {
+    if (!result) {
+      setLoadingRecs(false);
+      return;
+    }
     if (localTips.length === 0) {
       setLoadingRecs(false);
       return;
     }
+    const sourceProduct = result.product;
     let mounted = true;
     setLoadingRecs(true);
-
-    const cleanQuery = (s: string) => s.replace(/\s*\(.*?\)\s*/g, " ").replace(/\s*—.*$/, "").replace(/e\.g\.\s*/gi, "").trim();
 
     const timeout = setTimeout(() => {
       if (mounted) setLoadingRecs(false);
@@ -78,31 +105,27 @@ export default function SwapsScreen() {
         const seen = new Set<string>();
         const recs: RecommendedProduct[] = [];
 
-        const uniqueQueries: { query: string; tip: LocalSwapTip }[] = [];
-        const seenQueries = new Set<string>();
-        for (const tip of localTips) {
-          const q = cleanQuery(tip.suggestion);
-          if (q && q.length >= 3 && !seenQueries.has(q.toLowerCase())) {
-            seenQueries.add(q.toLowerCase());
-            uniqueQueries.push({ query: q, tip });
+        for (const tip of localTips.slice(0, 4)) {
+          if (!mounted) break;
+          try {
+            const merged = await fetchCandidatesForSwapTip(sourceProduct, tip, p);
+            const picked = pickSwapProductFromCandidates(sourceProduct, tip, merged, seen, p);
+            if (picked?.product.code) {
+              seen.add(picked.product.code);
+              recs.push({
+                product: picked.product,
+                score: picked.score,
+                label: picked.label,
+                tipSuggestion: tip.suggestion,
+              });
+            }
+          } catch {
+            /* skip this tip */
           }
         }
 
-        for (const { query, tip } of uniqueQueries.slice(0, 3)) {
-          if (!mounted) break;
-          try {
-            const results = await searchProductsUnified(query, { pageSize: 3, countryCode: p?.countryCode });
-            const best = results.find((r) => r.code && !seen.has(r.code) && r.product_name);
-            if (best?.code) {
-              seen.add(best.code);
-              const analysis = analyzeProduct(p, best);
-              recs.push({ product: best, score: analysis.overallScore, label: analysis.overallLabel, tipSuggestion: tip.suggestion });
-            }
-          } catch { /* skip this search */ }
-        }
-
         if (mounted) {
-          setRecommended(recs.sort((a, b) => b.score - a.score));
+          setRecommended(recs);
           setLoadingRecs(false);
           clearTimeout(timeout);
         }
@@ -113,7 +136,19 @@ export default function SwapsScreen() {
     })();
 
     return () => { mounted = false; clearTimeout(timeout); };
-  }, [localTips]);
+  }, [localTips, result]);
+
+  const alternativeRows = React.useMemo((): AlternativeRow[] => {
+    if (localTips.length === 0) return [];
+    const bySuggestion = new Map<string, RecommendedProduct>();
+    for (const r of recommended) {
+      bySuggestion.set(r.tipSuggestion, r);
+    }
+    return localTips.slice(0, 4).map((tip) => ({
+      tip,
+      productRec: bySuggestion.get(tip.suggestion) ?? null,
+    }));
+  }, [localTips, recommended]);
 
   if (loading) {
     return (
@@ -140,8 +175,8 @@ export default function SwapsScreen() {
         description="Upgrade to FoodScan Pro for healthier alternatives, swap recommendations, and more."
         onClose={() => router.back()}
         onUnlock={async () => {
-          const purchased = await showPaywall();
-          if (purchased) refreshSubscription();
+          await showPaywall();
+          await refreshSubscription();
         }}
       />
     );
@@ -164,59 +199,116 @@ export default function SwapsScreen() {
           }}
         >
           <Text className="text-base font-semibold" style={textWhite}>Healthier alternatives</Text>
-          <Text className="mt-0.5 text-sm text-muted-foreground" style={textMuted}>Tap to view product details</Text>
+          <Text className="mt-0.5 text-sm text-muted-foreground" style={textMuted}>
+            Tap a row to open that product. We look it up in the database first; if it is not found, we open search.
+          </Text>
           <View className="gap-3 mt-4">
-            {loadingRecs && (
+            {loadingRecs && localTips.length > 0 && (
               <View className="items-center py-8 gap-3">
                 <ActivityIndicator size="small" color={THEME.primary} />
                 <Text className="text-sm text-muted-foreground" style={textMuted}>Finding products…</Text>
               </View>
             )}
-            {!loadingRecs && recommended.length === 0 && (
-              <Text className="py-4 text-sm text-muted-foreground text-center" style={textMuted}>No matching products found in the database.</Text>
+            {!loadingRecs && alternativeRows.length === 0 && (
+              <Text className="py-4 text-sm text-muted-foreground text-center" style={textMuted}>
+                No swap suggestions for this product.
+              </Text>
             )}
-            {recommended.map((rec) => (
-              <Pressable
-                key={rec.product.code}
-                style={{
-                  padding: 16,
-                  borderRadius: 14,
-                  borderWidth: 1.5,
-                  borderColor: isDark ? "#333" : "#e2e8f0",
-                  backgroundColor: isDark ? "#18181b" : "#f8fafc",
-                }}
-                onPress={async () => {
-                  const p = await getHealthProfile();
-                  const scan = makeSwapScanResult(rec.product, p);
-                  await addToScanHistory(scan);
-                  router.push(`/results/${scan.id}`);
-                }}
-              >
-                <View className="flex-row items-center justify-between">
-                  <View className="flex-1 pr-3">
-                    <Text className="font-semibold text-sm" numberOfLines={2} ellipsizeMode="tail" style={textWhite}>
-                      {getDisplayProductName(rec.product)}
-                    </Text>
-                    <Text className="text-xs text-muted-foreground mt-0.5" numberOfLines={1} style={textMuted}>
-                      {getDisplayBrand(rec.product) ?? ""}
-                    </Text>
-                  </View>
-                  <View className="flex-row items-center gap-2">
-                    <View
-                      style={{
-                        paddingHorizontal: 10,
-                        paddingVertical: 5,
-                        borderRadius: 10,
-                        backgroundColor: isDark ? "rgba(34,197,94,0.15)" : "rgba(34,197,94,0.12)",
-                      }}
-                    >
-                      <Text className="text-xs font-bold" style={{ color: THEME.primary }}>{rec.score}</Text>
+            {!loadingRecs &&
+              alternativeRows.map(({ tip, productRec: rec }, idx) =>
+                rec ? (
+                  <Pressable
+                    key={rec.product.code}
+                    style={{
+                      padding: 16,
+                      borderRadius: 14,
+                      borderWidth: 1.5,
+                      borderColor: isDark ? "#333" : "#e2e8f0",
+                      backgroundColor: isDark ? "#18181b" : "#f8fafc",
+                    }}
+                    onPress={() => openSwapProductResult(rec.product)}
+                  >
+                    <View className="flex-row items-center justify-between">
+                      <View className="flex-1 pr-3">
+                        <Text className="font-semibold text-sm" numberOfLines={2} ellipsizeMode="tail" style={textWhite}>
+                          {getDisplayProductName(rec.product)}
+                        </Text>
+                        <Text className="text-xs text-muted-foreground mt-0.5" numberOfLines={1} style={textMuted}>
+                          {getDisplayBrand(rec.product) ?? ""}
+                        </Text>
+                        <Text className="text-[11px] mt-1.5 leading-4" numberOfLines={2} style={textMuted}>
+                          For: {rec.tipSuggestion}
+                        </Text>
+                      </View>
+                      <View className="flex-row items-center gap-2">
+                        <View
+                          style={{
+                            paddingHorizontal: 10,
+                            paddingVertical: 5,
+                            borderRadius: 10,
+                            backgroundColor: isDark ? "rgba(34,197,94,0.15)" : "rgba(34,197,94,0.12)",
+                          }}
+                        >
+                          <Text className="text-xs font-bold" style={{ color: THEME.primary }}>
+                            {rec.score}
+                          </Text>
+                        </View>
+                        <ArrowRight size={14} color={isDark ? "#a1a1aa" : "#6b7280"} />
+                      </View>
                     </View>
-                    <ArrowRight size={14} color={isDark ? "#a1a1aa" : "#6b7280"} />
-                  </View>
-                </View>
-              </Pressable>
-            ))}
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    key={`tip-fallback-${idx}-${tip.suggestion}`}
+                    disabled={openingTipKey !== null}
+                    style={{
+                      padding: 16,
+                      borderRadius: 14,
+                      borderWidth: 1.5,
+                      borderColor: isDark ? "#333" : "#e2e8f0",
+                      backgroundColor: isDark ? "#18181b" : "#f8fafc",
+                      opacity: openingTipKey !== null && openingTipKey !== `tip-${idx}` ? 0.55 : 1,
+                    }}
+                    onPress={async () => {
+                      if (!result) return;
+                      const rowKey = `tip-${idx}`;
+                      setOpeningTipKey(rowKey);
+                      try {
+                        const p = await getHealthProfile();
+                        const found = await findProductForSwapTip(result.product, tip, p);
+                        if (found) {
+                          await openSwapProductResult(found.product);
+                          return;
+                        }
+                        router.push({
+                          pathname: "/search",
+                          params: { q: tip.suggestion },
+                        });
+                      } finally {
+                        setOpeningTipKey(null);
+                      }
+                    }}
+                  >
+                    <View className="flex-row items-center justify-between">
+                      <View className="flex-1 pr-3">
+                        <Text className="font-semibold text-sm" numberOfLines={2} ellipsizeMode="tail" style={textWhite}>
+                          {tip.suggestion}
+                        </Text>
+                        <Text className="text-[11px] mt-1.5 leading-4" numberOfLines={3} style={textMuted}>
+                          {tip.reason}
+                        </Text>
+                      </View>
+                      <View className="flex-row items-center gap-2">
+                        {openingTipKey === `tip-${idx}` ? (
+                          <ActivityIndicator size="small" color={THEME.primary} />
+                        ) : (
+                          <ArrowRight size={14} color={isDark ? "#a1a1aa" : "#6b7280"} />
+                        )}
+                      </View>
+                    </View>
+                  </Pressable>
+                ),
+              )}
           </View>
         </View>
 

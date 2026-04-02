@@ -2,9 +2,21 @@
  * Unified Search and Describe pipeline.
  * ALWAYS returns results, ranked by similarity + brand + country.
  * Uses Open Food Facts + optional Supabase online search.
+ *
+ * Uses static imports (no dynamic import()) so Metro never requests extra JS
+ * chunks during search — avoids LoadBundleFromServerRequestError when the dev
+ * server is flaky or unreachable.
  */
 import type { ProductResult } from "@/types/food";
+import { lookupProductOnline } from "@/lib/lookup-product-online";
+import {
+  getPopularProductsInCountry,
+  searchProducts,
+  searchProductsWithSimilar,
+} from "@/lib/open-food-facts";
 import { rankProducts, isGenericQuery } from "@/lib/search-ranking";
+import { getHealthProfile } from "@/lib/storage";
+import { supabase } from "@/lib/supabase";
 
 const DEBUG = __DEV__;
 
@@ -33,7 +45,6 @@ export async function enrichProduct(p: ProductResult): Promise<ProductResult> {
     if (hasCompleteInfo(p)) return p;
     const q = [p.product_name, p.brands].filter(Boolean).join(" ").trim();
     if (!q) return p;
-    const { lookupProductOnline } = await import("@/lib/lookup-product-online");
     const lookedUp = await lookupProductOnline(q);
     if (!lookedUp) return p;
     return {
@@ -73,7 +84,6 @@ function mergeNutriments(
 
 export async function searchProductsOnline(query: string): Promise<ProductResult[]> {
   try {
-    const { supabase } = await import("@/lib/supabase");
     if (!supabase) return [];
     const trimmed = query.trim();
     if (!trimmed) return [];
@@ -127,9 +137,6 @@ async function fetchCandidates(
   countryCode: string | undefined,
   pageSize: number
 ): Promise<ProductResult[]> {
-  const { searchProducts, searchProductsWithSimilar, getPopularProductsInCountry } = await import(
-    "@/lib/open-food-facts"
-  );
   const seen = new Set<string>();
 
   const variants = getQueryVariants(queryText).slice(0, 5);
@@ -198,8 +205,6 @@ export async function searchProductsUnified(
 
   if (!trimmed) {
     try {
-      const { getHealthProfile } = await import("@/lib/storage");
-      const { getPopularProductsInCountry } = await import("@/lib/open-food-facts");
       const profile = await getHealthProfile().catch(() => null);
       const cc = profile?.countryCode ?? countryCode;
       return getPopularProductsInCountry(cc, pageSize, SEARCH_TIMEOUT_MS);
@@ -209,7 +214,6 @@ export async function searchProductsUnified(
   }
 
   try {
-    const { getHealthProfile } = await import("@/lib/storage");
     const profile = await getHealthProfile().catch(() => null);
     const effectiveCountry = profile?.countryCode ?? countryCode;
 
@@ -246,7 +250,6 @@ export async function searchProductsUnified(
     }
 
     if (ranked.length === 0) {
-      const { getPopularProductsInCountry } = await import("@/lib/open-food-facts");
       ranked = await getPopularProductsInCountry(effectiveCountry, pageSize, SEARCH_TIMEOUT_MS);
       ranked = rankProducts(ranked, {
         queryText: trimmed,
@@ -278,8 +281,6 @@ export async function searchProductsUnified(
   } catch (e) {
     logError("searchProductsUnified error:", e);
     try {
-      const { getPopularProductsInCountry } = await import("@/lib/open-food-facts");
-      const { getHealthProfile } = await import("@/lib/storage");
       const profile = await getHealthProfile().catch(() => null);
       return getPopularProductsInCountry(profile?.countryCode ?? countryCode, pageSize, SEARCH_TIMEOUT_MS);
     } catch (fallbackError) {

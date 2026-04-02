@@ -1,7 +1,17 @@
 import { Stack } from "expo-router";
 import * as React from "react";
-import { StatusBar as RNStatusBar, useColorScheme, View } from "react-native";
+import { LogBox, StatusBar as RNStatusBar, useColorScheme, View } from "react-native";
 import "react-native-reanimated";
+
+// RevenueCat: expected test noise + offerings 404 when the public SDK key or dashboard setup is wrong (fix keys; don’t treat as app crash).
+if (__DEV__) {
+  LogBox.ignoreLogs([
+    "[RevenueCat] [Test Store] Purchase failure simulated successfully",
+    "Purchase failure simulated successfully in Test Store",
+    /Error fetching offerings/i,
+    /OfferingsManager\.Error/i,
+  ]);
+}
 import "@/global.css";
 import { THEME } from "@/lib/theme";
 import { FontSizeProvider, UnitsProvider } from "@/lib/use-settings";

@@ -1,79 +1,42 @@
-import { useRouter } from "expo-router";
-import * as React from "react";
 import { useFocusEffect } from "@react-navigation/native";
+import { useRouter } from "expo-router";
+import { Camera, Crown, List, PenLine, ScanBarcode } from "lucide-react-native";
+import { useColorScheme as useNativeWindScheme } from "nativewind";
+import * as React from "react";
 import {
   ActivityIndicator,
   Animated,
   Appearance,
+  Dimensions,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Pressable,
-  StyleSheet,
   Text as RNText,
+  ScrollView,
   useColorScheme,
+  useWindowDimensions,
   View,
 } from "react-native";
-import { useColorScheme as useNativeWindScheme } from "nativewind";
-import { Camera, ChevronDown, Crown, List, PenLine, ScanBarcode } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AddFoodDropdown } from "@/components/add-food-dropdown";
 import { AppHeader } from "@/components/app-header";
+import { OnboardingChecklist } from "@/components/onboarding-checklist";
 import { Button } from "@/components/ui/button.native";
 import { Text } from "@/components/ui/text";
-import { THEME } from "@/lib/theme";
-import { addToScanHistory, getHealthProfile, getScanHistory, getSettings } from "@/lib/storage";
-import { useOnboarding } from "@/lib/use-settings";
-import { OnboardingChecklist } from "@/components/onboarding-checklist";
 import { getProductByBarcode } from "@/lib/open-food-facts";
+import { FREE_DAILY_SCANS, useSubscription } from "@/lib/revenuecat";
 import { analyzeProduct } from "@/lib/scoring";
-import { useSubscription, FREE_DAILY_SCANS } from "@/lib/revenuecat";
+import {
+  addToScanHistory,
+  getHealthProfile,
+  getScanHistory,
+  getSettings,
+} from "@/lib/storage";
+import { THEME } from "@/lib/theme";
+import { useOnboarding } from "@/lib/use-settings";
 import type { ScanResult } from "@/types/food";
 
 const HEADER_HIDE_OFFSET = 140;
-
-const BUTTON_HEIGHT = 50;
-const LABEL_LINE_HEIGHT = 22;
-const BUTTON_VERTICAL_PADDING = (BUTTON_HEIGHT - LABEL_LINE_HEIGHT) / 2;
-const BUTTON_PADDING_TOP = BUTTON_VERTICAL_PADDING + 8;
-const BUTTON_PADDING_BOTTOM = BUTTON_VERTICAL_PADDING - 8;
-
-const styles = StyleSheet.create({
-  homeButtonWrapper: {
-    alignSelf: "stretch",
-    height: BUTTON_HEIGHT,
-    borderWidth: 2,
-    borderRadius: 8,
-    overflow: "hidden",
-  },
-  homeButtonPressable: {
-    width: "100%",
-    height: "100%",
-    paddingTop: BUTTON_PADDING_TOP,
-    paddingBottom: BUTTON_PADDING_BOTTOM,
-    paddingHorizontal: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  homeButtonContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  homeButtonChevronWrap: {
-    flexShrink: 0,
-    minWidth: 24,
-    minHeight: 24,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  homeButtonLabel: {
-    fontSize: 18,
-    fontWeight: "600",
-    lineHeight: LABEL_LINE_HEIGHT,
-    textAlign: "center",
-    includeFontPadding: false,
-  },
-});
 
 const EXAMPLES: Array<{ code: string; label: string }> = [
   { code: "3017620422003", label: "Nutella" },
@@ -92,11 +55,24 @@ export default function ScanScreen() {
   const { setColorScheme: setNativeWindScheme } = useNativeWindScheme();
   const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
+  const { width: winW } = useWindowDimensions();
+  /** Avoid 0-width first frame; use window (not screen) so width matches the scroll view. */
+  const windowW = Dimensions.get("window").width;
+  const screenW = Math.max(winW || 0, windowW || 0, 360);
   const headerHeight = React.useMemo(() => insets.top + 54, [insets.top]);
+  const padLeft = Math.max(insets.left, 12);
+  const padRight = Math.max(insets.right, 12);
+  const contentWidth = Math.max(1, screenW - padLeft - padRight);
   const headerY = React.useRef(new Animated.Value(0)).current;
   const lastScrollY = React.useRef(0);
   const headerVisible = React.useRef(true);
-  const { canScan, freeScansRemaining, isPro, recordScan, showPaywall, refresh: refreshSub } = useSubscription();
+  const {
+    freeScansRemaining,
+    isPro,
+    recordScan,
+    showPaywall,
+    refresh: refreshSub,
+  } = useSubscription();
 
   React.useEffect(() => {
     getSettings().then((s) => {
@@ -105,13 +81,19 @@ export default function ScanScreen() {
     });
   }, [setNativeWindScheme]);
 
-  const { onboardingDone, dismissOnboarding, refresh: refreshOnboarding } = useOnboarding();
-  const [profileExists, setProfileExists] = React.useState<boolean | null>(null);
-  const [hasScannedBefore, setHasScannedBefore] = React.useState<boolean | null>(null);
+  const {
+    onboardingDone,
+    dismissOnboarding,
+    refresh: refreshOnboarding,
+  } = useOnboarding();
+  const [profileExists, setProfileExists] = React.useState<boolean | null>(
+    null,
+  );
+  const [hasScannedBefore, setHasScannedBefore] = React.useState<
+    boolean | null
+  >(null);
   const [busy, setBusy] = React.useState(false);
   const [busyLabel, setBusyLabel] = React.useState<string>("Analyzing…");
-  const [searchDropdownOpen, setSearchDropdownOpen] = React.useState(true);
-
   const setBarVisible = React.useCallback(
     (visible: boolean) => {
       if (visible === headerVisible.current) return;
@@ -141,7 +123,10 @@ export default function ScanScreen() {
   );
 
   const load = React.useCallback(async () => {
-    const [h, history] = await Promise.all([getHealthProfile(), getScanHistory()]);
+    const [h, history] = await Promise.all([
+      getHealthProfile(),
+      getScanHistory(),
+    ]);
     setProfileExists(!!h);
     setHasScannedBefore(history.length > 0);
   }, []);
@@ -162,12 +147,11 @@ export default function ScanScreen() {
     { label: "Scan barcode", href: "/scanner" as const, icon: ScanBarcode },
     { label: "Scan food", href: "/photo" as const, icon: Camera },
     { label: "Describe food", href: "/label" as const, icon: PenLine },
-    { label: "Search for foods", href: "/search" as const, icon: List },
+    { label: "Search foods", href: "/search" as const, icon: List },
   ] as const;
 
   const onSearchOption = async (href: string) => {
     if (href === "/search") {
-      setSearchDropdownOpen(false);
       router.push(href);
       return;
     }
@@ -176,7 +160,6 @@ export default function ScanScreen() {
       await showPaywall();
       return;
     }
-    setSearchDropdownOpen(false);
     router.push(href as "/scanner" | "/photo" | "/label" | "/search");
   };
 
@@ -216,7 +199,8 @@ export default function ScanScreen() {
   const pageBg = isDark ? THEME.darkBg : THEME.bgLight;
   const textPrimary = isDark ? THEME.white : THEME.darkGrey;
   const textMuted = isDark ? "#a1a1aa" : THEME.mutedGrey;
-
+  const heroIconBorder = isDark ? THEME.borderDark : THEME.borderLight;
+  const heroIconBg = isDark ? "rgba(34, 197, 94, 0.12)" : THEME.primaryLight;
   return (
     <View className="flex-1" style={{ backgroundColor: pageBg }}>
       <Animated.View
@@ -232,145 +216,147 @@ export default function ScanScreen() {
         <AppHeader subtitle="Eat smarter, live better" />
       </Animated.View>
 
-      <Animated.ScrollView
-        className="flex-1"
-        style={{ backgroundColor: pageBg }}
+      <ScrollView
+        style={{ flex: 1, backgroundColor: pageBg }}
         contentContainerStyle={{
           paddingTop: headerHeight,
-          paddingBottom: insets.bottom + 24,
+          paddingBottom: Math.max(insets.bottom, 12) + 16,
+          width: screenW,
           flexGrow: 1,
         }}
         onScroll={onScroll}
         scrollEventThrottle={16}
       >
-        <View className="flex-1 px-4 pt-6 pb-6" style={{ minHeight: 400 }}>
-          {!onboardingDone && (
-            <View className="mb-4">
-              <OnboardingChecklist onDismiss={dismissOnboarding} isDark={isDark} />
-            </View>
-          )}
-
-          {/* Large central icon */}
-          <View
-            style={{
-              width: 100,
-              height: 100,
-              borderRadius: 16,
-              alignSelf: "center",
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: "rgba(22, 163, 74, 0.25)",
-            }}
-          >
-            <ScanBarcode size={48} color={THEME.primary} strokeWidth={2.5} />
-          </View>
-
-          <RNText
-            style={{
-              marginTop: 28,
-              color: textPrimary,
-              fontSize: 26,
-              fontWeight: "700",
-              textAlign: "center",
-            }}
-          >
-            Discover What's Inside
-          </RNText>
-          <Text
-            className="mt-2 text-center px-4"
-            style={{ color: textMuted, fontSize: 15, lineHeight: 22, maxWidth: 320, alignSelf: "center" }}
-          >
-            Scan barcodes for health insights, ingredients, and recommendations.
-          </Text>
-
-          {!isPro && (
-            <Pressable
-              onPress={() => showPaywall()}
-              style={{
-                marginTop: 16,
-                flexDirection: "row",
-                alignItems: "center",
-                alignSelf: "center",
-                gap: 6,
-                backgroundColor: freeScansRemaining <= 1 ? "rgba(239,68,68,0.1)" : "rgba(34,197,94,0.1)",
-                paddingHorizontal: 14,
-                paddingVertical: 8,
-                borderRadius: 20,
-                borderWidth: 1,
-                borderColor: freeScansRemaining <= 1 ? "rgba(239,68,68,0.3)" : "rgba(34,197,94,0.3)",
-              }}
-            >
-              <Crown size={14} color={freeScansRemaining <= 1 ? "#ef4444" : THEME.primary} />
-              <RNText
-                style={{
-                  fontSize: 13,
-                  fontWeight: "600",
-                  color: freeScansRemaining <= 1 ? "#ef4444" : THEME.primary,
-                }}
-              >
-                {freeScansRemaining}/{FREE_DAILY_SCANS} free scans left today
-              </RNText>
-            </Pressable>
-          )}
-
-          <View className="mt-10 w-full" style={{ alignSelf: "stretch" }}>
-            <View style={[styles.homeButtonWrapper, { borderColor: THEME.darkGrey }]}>
-              <Pressable
-                onPress={() => setSearchDropdownOpen((open) => !open)}
-                accessibilityLabel="Start scanning"
-                role="button"
-                style={({ pressed }) => [
-                  styles.homeButtonPressable,
-                  { paddingTop: 26, paddingBottom: 2 },
-                  pressed && { opacity: 0.9 },
-                ]}
-              >
-                <View style={[styles.homeButtonContent, { marginTop: 10 }]}>
-                  <RNText style={[styles.homeButtonLabel, { color: textPrimary }]} numberOfLines={1}>
-                    {searchDropdownOpen ? "Hide options" : "Start Scanning"}
-                  </RNText>
-                  <View style={styles.homeButtonChevronWrap} pointerEvents="none">
-                    <ChevronDown
-                      size={20}
-                      color={isDark ? THEME.white : THEME.darkGrey}
-                    />
-                  </View>
-                </View>
-              </Pressable>
-            </View>
-            {searchDropdownOpen && (
-              <View
-                className="mt-3 w-full overflow-hidden border"
-                style={{
-                  alignSelf: "stretch",
-                  borderRadius: 8,
-                  borderColor: isDark ? THEME.borderDark : THEME.borderLight,
-                  backgroundColor: isDark ? THEME.darkCard : THEME.white,
-                }}
-              >
-                {searchOptions.map((opt) => {
-                  const Icon = opt.icon;
-                  return (
-                    <Button
-                      key={opt.href}
-                      variant="ghost"
-                      onPress={() => onSearchOption(opt.href)}
-                      className="flex-row items-center gap-3 border-b border-border px-4 py-3.5 last:border-b-0 rounded-none"
-                    >
-                      <Icon size={20} color={THEME.primary} />
-                      <Text className="text-base" style={{ color: textPrimary }}>
-                        {opt.label}
-                      </Text>
-                    </Button>
-                  );
-                })}
+        <View
+          style={{
+            width: screenW,
+            paddingLeft: padLeft,
+            paddingRight: padRight,
+            paddingTop: 24,
+            paddingBottom: 24,
+          }}
+        >
+          <View>
+            {!onboardingDone && (
+              <View className="mb-4">
+                <OnboardingChecklist
+                  onDismiss={dismissOnboarding}
+                  isDark={isDark}
+                />
               </View>
             )}
+
+            {/* Large central icon */}
+            <View
+              style={{
+                width: 100,
+                height: 100,
+                borderRadius: 16,
+                alignSelf: "center",
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: heroIconBg,
+                borderWidth: 1,
+                borderColor: heroIconBorder,
+              }}
+            >
+              <ScanBarcode size={48} color={THEME.primary} strokeWidth={2.5} />
+            </View>
+
+            <RNText
+              style={{
+                marginTop: 28,
+                color: textPrimary,
+                fontSize: 26,
+                fontWeight: "700",
+                textAlign: "center",
+              }}
+            >
+              Discover What's Inside
+            </RNText>
+            <Text
+              className="mt-2 text-center"
+              style={{
+                color: textMuted,
+                fontSize: 15,
+                lineHeight: 22,
+                alignSelf: "center",
+                paddingHorizontal: 4,
+              }}
+            >
+              Barcode, photo, description, or search — same health insights
+              everywhere.
+            </Text>
+
+            {!isPro && (
+              <Pressable
+                onPress={() => showPaywall()}
+                style={{
+                  marginTop: 16,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  alignSelf: "center",
+                  gap: 6,
+                  backgroundColor:
+                    freeScansRemaining <= 1
+                      ? "rgba(239,68,68,0.1)"
+                      : "rgba(34,197,94,0.1)",
+                  paddingHorizontal: 14,
+                  paddingVertical: 8,
+                  borderRadius: 20,
+                  borderWidth: 1,
+                  borderColor:
+                    freeScansRemaining <= 1
+                      ? "rgba(239,68,68,0.3)"
+                      : "rgba(34,197,94,0.3)",
+                }}
+              >
+                <Crown
+                  size={14}
+                  color={freeScansRemaining <= 1 ? "#ef4444" : THEME.primary}
+                />
+                <RNText
+                  style={{
+                    fontSize: 13,
+                    fontWeight: "600",
+                    color: freeScansRemaining <= 1 ? "#ef4444" : THEME.primary,
+                  }}
+                >
+                  {freeScansRemaining}/{FREE_DAILY_SCANS} free scans left today
+                </RNText>
+              </Pressable>
+            )}
+          </View>
+
+          <View style={{ width: contentWidth, marginTop: 28 }}>
+            <RNText
+              style={{
+                color: textMuted,
+                fontSize: 13,
+                fontWeight: "600",
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                textAlign: "center",
+                marginBottom: 14,
+                width: contentWidth,
+              }}
+            >
+              Add a food
+            </RNText>
+            <AddFoodDropdown
+              options={searchOptions}
+              onPick={(href) => void onSearchOption(href)}
+              isDark={isDark}
+              width={contentWidth}
+            />
           </View>
 
           {hasScannedBefore === false ? (
             <View className="mt-8">
-              <Text className="mb-3 text-center text-sm" style={{ color: textMuted }}>
+              <Text
+                className="mb-3 text-center text-sm"
+                style={{ color: textMuted }}
+              >
                 Try these example barcodes:
               </Text>
               <View className="flex-row flex-wrap gap-3">
@@ -379,16 +365,24 @@ export default function ScanScreen() {
                     key={e.code}
                     variant="outline"
                     onPress={() => analyzeBarcode(e.code)}
-                    className="flex-1 min-w-[45%] rounded-2xl px-4 py-4"
+                    className="min-w-[45%] flex-1 rounded-2xl px-4 py-4"
                     style={{
                       backgroundColor: isDark ? THEME.darkCard : THEME.white,
-                      borderColor: isDark ? THEME.borderDark : THEME.borderLight,
+                      borderColor: isDark
+                        ? THEME.borderDark
+                        : THEME.borderLight,
                     }}
                   >
-                    <Text className="text-center font-semibold" style={{ color: textPrimary }}>
+                    <Text
+                      className="text-center font-semibold"
+                      style={{ color: textPrimary }}
+                    >
                       {e.code}
                     </Text>
-                    <Text className="mt-1 text-center text-xs" style={{ color: textMuted }}>
+                    <Text
+                      className="mt-1 text-center text-xs"
+                      style={{ color: textMuted }}
+                    >
                       {e.label}
                     </Text>
                   </Button>
@@ -396,44 +390,33 @@ export default function ScanScreen() {
               </View>
             </View>
           ) : (
-            <View className="mt-6 w-full" style={{ alignSelf: "stretch" }}>
-              <View style={[styles.homeButtonWrapper, { borderColor: THEME.darkGrey }]}>
-                <Pressable
-                  onPress={() => router.push("/(tabs)/history")}
-                  style={({ pressed }) => [
-                    styles.homeButtonPressable,
-                    { paddingTop: 26, paddingBottom: 2 },
-                    pressed && { opacity: 0.9 },
-                  ]}
-                >
-                  <RNText
-                    style={[styles.homeButtonLabel, { color: textPrimary, marginTop: 10 }]}
-                    numberOfLines={1}
-                  >
-                    View Scan History
-                  </RNText>
-                </Pressable>
-              </View>
-              <Text className="mt-4 text-center text-sm" style={{ color: textMuted }}>
-                Scan another product or use Start Scanning above.
-              </Text>
-            </View>
+            <Text
+              className="mt-8 text-center text-sm"
+              style={{ color: textMuted }}
+            >
+              Scan another product or tap an option above.
+            </Text>
           )}
         </View>
-      </Animated.ScrollView>
+      </ScrollView>
 
       {busy && (
         <View className="absolute inset-0 z-30 items-center justify-center bg-black/40">
           <View
             className="rounded-2xl px-6 py-5"
-            style={{ backgroundColor: isDark ? THEME.darkCard : THEME.cardLight }}
+            style={{
+              backgroundColor: isDark ? THEME.darkCard : THEME.cardLight,
+            }}
           >
             <ActivityIndicator />
             <Text className="mt-2 text-center" style={{ color: textPrimary }}>
               {busyLabel}
             </Text>
             {profileExists === false && (
-              <Text className="mt-1 text-center text-xs" style={{ color: textMuted }}>
+              <Text
+                className="mt-1 text-center text-xs"
+                style={{ color: textMuted }}
+              >
                 Generic advice shown until you create a profile.
               </Text>
             )}

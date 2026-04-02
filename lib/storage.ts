@@ -3,6 +3,10 @@ import { Platform } from "react-native";
 import { requireOptionalNativeModule } from "expo-modules-core";
 import type { HealthProfile, ScanResult } from "@/types/food";
 import { updateDailySummaryFromScan } from "@/lib/analytics";
+import {
+  type UserDataExportPayload,
+  formatUserDataExportForShare,
+} from "@/lib/format-export-share";
 
 const KEYS = {
   HEALTH_PROFILE: "HEALTH_PROFILE",
@@ -228,19 +232,16 @@ export async function exportUserData(): Promise<string> {
     getSettings(),
     import("@/lib/reactions").then((m) => m.getReactions()),
   ]);
-  return JSON.stringify(
-    {
-      exportedAt: new Date().toISOString(),
-      profile,
-      scanHistoryCount: history.length,
-      favoritesCount: favorites.length,
-      reactionsCount: reactions.length,
-      reactions: reactions.slice(0, 100),
-      settings: { units: settings.units, colorScheme: settings.colorScheme },
-    },
-    null,
-    2,
-  );
+  const payload: UserDataExportPayload = {
+    exportedAt: new Date().toISOString(),
+    profile,
+    scanHistoryCount: history.length,
+    favoritesCount: favorites.length,
+    reactionsCount: reactions.length,
+    reactions: reactions.slice(0, 100),
+    settings: { units: settings.units, colorScheme: settings.colorScheme },
+  };
+  return formatUserDataExportForShare(payload);
 }
 
 export async function getSettings(): Promise<AppSettings> {

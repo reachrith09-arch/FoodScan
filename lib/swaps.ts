@@ -1,6 +1,6 @@
 import type { HealthProfile, ProductResult, ScanResult } from "@/types/food";
 import { searchProductsUnified } from "@/lib/search-products-online";
-import { parseQueryForBrand } from "@/lib/open-food-facts";
+import { getProductByBarcode, parseQueryForBrand } from "@/lib/open-food-facts";
 import { analyzeProduct } from "@/lib/scoring";
 
 export interface SwapRecommendation {
@@ -13,6 +13,8 @@ export interface LocalSwapTip {
   original: string;
   suggestion: string;
   reason: string;
+  /** Bias product search toward the same aisle/category as the scanned item */
+  searchContext?: string;
 }
 
 // ─── Local swap knowledge base ──────────────────────────────────────────────
@@ -479,45 +481,595 @@ export function getLocalSwapTips(product: ProductResult): LocalSwapTip[] {
         original: label,
         suggestion: swap.suggestion,
         reason: swap.reason,
+        searchContext: rule.category,
       });
     }
-    if (tips.length >= 4) break;
+    // One food family only: later rules (e.g. Bread matching "toast" in "Cinnamon Toast Crunch")
+    // must not add tips after a stronger earlier match like Cereal.
+    break;
   }
 
   if (tips.length === 0) {
     const productName = (product.product_name ?? "This product").trim();
     const displayName = productName.length > 30 ? productName.slice(0, 30) + "…" : productName;
     const nut = product.nutriments;
-    const sugar = nut?.sugars_100g ?? nut?.sugars;
-    const sodium = nut?.sodium_100g ?? (nut?.sodium != null ? nut.sodium * 1000 : undefined);
-    const satFat = nut?.["saturated-fat_100g"] ?? nut?.["saturated-fat"];
-    const fiber = nut?.fiber_100g ?? nut?.fiber;
-    const carbs = nut?.carbohydrates_100g ?? nut?.carbohydrates;
-    const protein = nut?.proteins_100g ?? nut?.proteins;
-
-    if (sugar != null && sugar > 15) {
-      tips.push({ original: displayName, suggestion: "Chomps Original Beef Stick", reason: `Zero sugar, 10g protein, grass-fed — vs ${Math.round(sugar)}g sugar in this` });
-      tips.push({ original: displayName, suggestion: "RXBAR Chocolate Sea Salt", reason: `Only 12g sugar from dates, 12g protein, no added sugar` });
-    }
-    if (sodium != null && sodium > 600) {
-      tips.push({ original: displayName, suggestion: "Epic Venison Sea Salt Bar", reason: `Only 300mg sodium vs ${Math.round(sodium)}mg in this, grass-fed, Whole30` });
-    }
-    if (satFat != null && satFat > 8) {
-      tips.push({ original: displayName, suggestion: "Primal Kitchen Collagen Bar", reason: `Only 3g sat fat, 12g protein, no seed oils` });
-    }
-    if (fiber != null && fiber < 2 && carbs != null && carbs > 15) {
-      tips.push({ original: displayName, suggestion: "Banza Chickpea Snacks", reason: "5g fiber, 6g protein per serving — way more fiber than this" });
-    }
-    if (protein != null && protein > 10 && tips.length < 2) {
-      tips.push({ original: displayName, suggestion: "Chomps Original Beef Stick", reason: "10g protein, zero sugar, grass-fed, only 100 cal" });
-    }
-    if (tips.length === 0) {
-      tips.push({ original: displayName, suggestion: "Epic Provisions Bar", reason: "Whole food protein bar, grass-fed, no fillers, clean snack" });
-      tips.push({ original: displayName, suggestion: "Simple Mills Almond Flour Crackers", reason: "Whole food snack, no seed oils, grain-free" });
-    }
+    const kind = inferNutrientFallbackKind(product);
+    const nutRec = nut as Record<string, number | undefined> | undefined;
+    pushNutrientFallbackTips(tips, seen, product, displayName, kind, {
+      sugar: nut?.sugars_100g ?? nut?.sugars,
+      sodium: nut?.sodium_100g ?? (nut?.sodium != null ? nut.sodium * 1000 : undefined),
+      satFat: nutRec?.["saturated-fat_100g"] ?? nutRec?.["saturated-fat"],
+      fiber: nut?.fiber_100g ?? nut?.fiber,
+      carbs: nut?.carbohydrates_100g ?? nut?.carbohydrates,
+      protein: nut?.proteins_100g ?? nut?.proteins,
+    });
   }
 
   return tips.slice(0, 4);
+}
+
+// ─── Similar search queries & ranking (keep swaps in the same “food family”) ─
+
+const QUERY_STOPWORDS = new Set([
+  "the",
+  "a",
+  "an",
+  "with",
+  "and",
+  "or",
+  "for",
+  "of",
+  "mini",
+  "pack",
+  "size",
+  "bar",
+  "original",
+  "flavor",
+  "flavoured",
+  "flavored",
+]);
+
+function tokenizeProductText(s: string): string[] {
+  return normalize(s)
+    .split(/[^a-z0-9]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3 && !QUERY_STOPWORDS.has(t));
+}
+
+/** Deepest-looking `en:` category tag as readable words (helps search stay on-aisle). */
+export function categorySearchHint(product: ProductResult): string {
+  const tags = (product.categories_tags ?? []).filter((t) => /^[a-z]{2}:/i.test(t));
+  if (tags.length === 0) return "";
+  const best = [...tags].sort((a, b) => b.length - a.length)[0];
+  return best.replace(/^[a-z]{2}:/i, "").replace(/-/g, " ").trim();
+}
+
+/** Clean a swap tip line into a search query fragment. */
+export function cleanSwapSuggestionQuery(s: string): string {
+  return s
+    .replace(/\s*\(.*?\)\s*/g, " ")
+    .replace(/\s*—.*$/, "")
+    .replace(/e\.g\.\s*/gi, "")
+    .replace(/\bhomemade:.*$/i, "")
+    .trim();
+}
+
+export function buildSwapSearchQuery(tip: LocalSwapTip, source: ProductResult): string {
+  const base = cleanSwapSuggestionQuery(tip.suggestion);
+  const ctx = (tip.searchContext ?? "").trim() || categorySearchHint(source);
+  if (!ctx) return base.slice(0, 130);
+  const ctxLower = ctx.toLowerCase();
+  if (base.toLowerCase().includes(ctxLower)) return base.slice(0, 130);
+  return `${base} ${ctx}`.replace(/\s+/g, " ").trim().slice(0, 130);
+}
+
+/**
+ * 0–1: overlap between the swap tip text (brand + product words) and the OFF name/brands.
+ * Used so “Healthier alternatives” rows match the suggested product, not just any high-score candy.
+ */
+export function productSimilarityToSwapSuggestion(
+  suggestionLine: string,
+  candidate: ProductResult,
+): number {
+  const raw = cleanSwapSuggestionQuery(suggestionLine);
+  if (!raw) return 0;
+  const blob = normalize(`${candidate.brands ?? ""} ${candidate.product_name ?? ""}`);
+  const tokens = raw
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2 && !QUERY_STOPWORDS.has(t));
+  if (tokens.length === 0) return 0;
+
+  let weighted = 0;
+  let totalW = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    const w = i === 0 ? 1.4 : 1;
+    totalW += w;
+    if (blob.includes(t)) weighted += w;
+  }
+  let score = weighted / totalW;
+
+  const phrase = normalize(raw).replace(/\s+/g, " ");
+  if (phrase.length >= 5 && blob.includes(phrase.replace(/ /g, ""))) {
+    score = Math.min(1, score + 0.25);
+  } else if (phrase.length >= 6 && blob.includes(phrase)) {
+    score = Math.min(1, score + 0.3);
+  }
+
+  return Math.min(1, score);
+}
+
+/**
+ * Multi-word tips (e.g. "Unreal Dark Chocolate Gems") must match the leading brand token
+ * in OFF data so generic "dark chocolate" products (Fin Carré, Lindt) don’t win.
+ */
+function suggestionLeadingBrandMatchesCandidate(
+  suggestionLine: string,
+  candidate: ProductResult,
+): boolean {
+  const raw = cleanSwapSuggestionQuery(suggestionLine);
+  const tokens = raw
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2 && !QUERY_STOPWORDS.has(t));
+  if (tokens.length < 2) return true;
+  const lead = tokens[0];
+  if (lead.length < 4) return true;
+  const blob = normalize(`${candidate.brands ?? ""} ${candidate.product_name ?? ""}`);
+  return blob.includes(lead);
+}
+
+const SWAP_RANK_WEIGHTS = { health: 0.22, sourceSim: 0.18, suggestionSim: 0.6 };
+
+/** Minimum suggestion match to prefer a hit over random high-health products. */
+const SWAP_SUGGESTION_ACCEPT_FLOOR = 0.14;
+const SWAP_SUGGESTION_WEAK_FLOOR = 0.06;
+
+/**
+ * Pick the database row that best matches the written swap tip (not only the scanned item).
+ */
+export function pickBestProductForSwapTip(
+  sourceProduct: ProductResult,
+  tip: Pick<LocalSwapTip, "suggestion">,
+  candidates: ProductResult[],
+  alreadyChosen: Set<string>,
+  profile: HealthProfile | null,
+): { product: ProductResult; score: number; label: string } | null {
+  const filtered = candidates.filter(
+    (r) =>
+      r.code &&
+      r.code !== sourceProduct.code &&
+      !alreadyChosen.has(r.code) &&
+      (r.product_name ?? "").trim().length > 0,
+  );
+  if (filtered.length === 0) return null;
+
+  const scored = filtered.map((r) => {
+    const analysis = analyzeProduct(profile, r);
+    const simSource = productSimilarityToSource(sourceProduct, r);
+    let simSug = productSimilarityToSwapSuggestion(tip.suggestion, r);
+    if (!suggestionLeadingBrandMatchesCandidate(tip.suggestion, r)) {
+      simSug = 0;
+    }
+    const h = Math.min(100, Math.max(0, analysis.overallScore)) / 100;
+    const combined =
+      h * SWAP_RANK_WEIGHTS.health +
+      simSource * SWAP_RANK_WEIGHTS.sourceSim +
+      simSug * SWAP_RANK_WEIGHTS.suggestionSim;
+    return {
+      product: r,
+      score: analysis.overallScore,
+      label: analysis.overallLabel,
+      simSug,
+      combined,
+    };
+  });
+  scored.sort((a, b) => b.combined - a.combined);
+
+  const strong = scored.filter((s) => s.simSug >= SWAP_SUGGESTION_ACCEPT_FLOOR);
+  const pool = strong.length > 0 ? strong : scored.filter((s) => s.simSug >= SWAP_SUGGESTION_WEAK_FLOOR);
+  const pick = pool.length > 0 ? pool[0] : null;
+  if (!pick) return null;
+  if (pick.simSug < SWAP_SUGGESTION_WEAK_FLOOR) return null;
+  return { product: pick.product, score: pick.score, label: pick.label };
+}
+
+/**
+ * When the strict ranker finds nothing (e.g. brand token mismatch in OFF), pick the closest
+ * name match to the written tip so tap-to-open can still land on the right product.
+ */
+function pickBestBySuggestionTextOnly(
+  sourceProduct: ProductResult,
+  tip: Pick<LocalSwapTip, "suggestion">,
+  candidates: ProductResult[],
+  profile: HealthProfile | null,
+  alreadyChosen: Set<string> = new Set(),
+): { product: ProductResult; score: number; label: string } | null {
+  const filtered = candidates.filter(
+    (r) =>
+      r.code &&
+      r.code !== sourceProduct.code &&
+      !alreadyChosen.has(r.code) &&
+      (r.product_name ?? "").trim().length > 0,
+  );
+  if (filtered.length === 0) return null;
+
+  const scored = filtered.map((r) => {
+    const sim = productSimilarityToSwapSuggestion(tip.suggestion, r);
+    const analysis = analyzeProduct(profile, r);
+    return { product: r, sim, score: analysis.overallScore, label: analysis.overallLabel };
+  });
+  scored.sort((a, b) => b.sim - a.sim || b.score - a.score);
+  const best = scored[0];
+  if (!best || best.sim < 0.09) return null;
+  return { product: best.product, score: best.score, label: best.label };
+}
+
+/** Last resort: leading token of the tip appears in OFF name/brands (e.g. “SmartSweets …”). */
+function pickByLeadingBrandLoose(
+  sourceProduct: ProductResult,
+  tip: Pick<LocalSwapTip, "suggestion">,
+  candidates: ProductResult[],
+  profile: HealthProfile | null,
+  alreadyChosen: Set<string> = new Set(),
+): { product: ProductResult; score: number; label: string } | null {
+  const raw = cleanSwapSuggestionQuery(tip.suggestion);
+  const tokens = raw
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3 && !QUERY_STOPWORDS.has(t));
+  if (tokens.length === 0) return null;
+  const lead = tokens[0];
+  if (lead.length < 3) return null;
+
+  const filtered = candidates.filter(
+    (r) =>
+      r.code &&
+      r.code !== sourceProduct.code &&
+      !alreadyChosen.has(r.code) &&
+      (r.product_name ?? "").trim().length > 0,
+  );
+  const blobMatches = filtered.filter((r) => {
+    const blob = normalize(`${r.brands ?? ""} ${r.product_name ?? ""}`);
+    return blob.includes(lead);
+  });
+  if (blobMatches.length === 0) return null;
+
+  const scored = blobMatches.map((r) => {
+    const sim = productSimilarityToSwapSuggestion(tip.suggestion, r);
+    const analysis = analyzeProduct(profile, r);
+    return { product: r, sim, score: analysis.overallScore, label: analysis.overallLabel };
+  });
+  scored.sort((a, b) => b.sim - a.sim || b.score - a.score);
+  const best = scored[0];
+  if (!best || best.sim < 0.055) return null;
+  return { product: best.product, score: best.score, label: best.label };
+}
+
+/**
+ * Strict ranked pick, then looser text match, then leading-brand match — used for preload and tap resolve.
+ */
+export function pickSwapProductFromCandidates(
+  sourceProduct: ProductResult,
+  tip: LocalSwapTip,
+  candidates: ProductResult[],
+  alreadyChosen: Set<string>,
+  profile: HealthProfile | null,
+): { product: ProductResult; score: number; label: string } | null {
+  const strict = pickBestProductForSwapTip(sourceProduct, tip, candidates, alreadyChosen, profile);
+  if (strict) return strict;
+  const text = pickBestBySuggestionTextOnly(sourceProduct, tip, candidates, profile, alreadyChosen);
+  if (text) return text;
+  return pickByLeadingBrandLoose(sourceProduct, tip, candidates, profile, alreadyChosen);
+}
+
+/** Fetch full OFF v2 payload by barcode so the result screen has complete nutrition/ingredients. */
+export async function hydrateProductForSwapNavigation(product: ProductResult): Promise<ProductResult> {
+  const code = String(product.code ?? "").trim();
+  if (!code || code.startsWith("online-")) return product;
+  try {
+    const full = await getProductByBarcode(code);
+    return full ?? product;
+  } catch {
+    return product;
+  }
+}
+
+function swapTipSearchQueryExtras(tip: LocalSwapTip): string[] {
+  const raw = cleanSwapSuggestionQuery(tip.suggestion);
+  const words = raw.split(/\s+/).map((w) => w.trim()).filter((w) => w.length > 2);
+  const out: string[] = [];
+  if (words[0] && words[0].length >= 3) out.push(words[0]);
+  if (words.length >= 2) out.push(`${words[0]} ${words[1]}`);
+  if (words.length >= 3) out.push(`${words[0]} ${words[1]} ${words[2]}`);
+  return out;
+}
+
+function dedupeSearchQueries(queries: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const q of queries) {
+    const k = q.toLowerCase().replace(/\s+/g, " ").trim();
+    if (k.length < 3 || seen.has(k)) continue;
+    seen.add(k);
+    out.push(q.trim());
+  }
+  return out;
+}
+
+/** Merge unified-search hits for all query variants for one tip (preload + tap). */
+export async function fetchCandidatesForSwapTip(
+  sourceProduct: ProductResult,
+  tip: LocalSwapTip,
+  profile: HealthProfile | null,
+  pageSize = 56,
+): Promise<ProductResult[]> {
+  const queries = dedupeSearchQueries([
+    buildSwapSearchQuery(tip, sourceProduct),
+    cleanSwapSuggestionQuery(tip.suggestion),
+    ...swapTipSearchQueryExtras(tip),
+  ]);
+
+  const byCode = new Map<string, ProductResult>();
+  for (const q of queries) {
+    try {
+      const results = await searchProductsUnified(q, {
+        pageSize,
+        countryCode: profile?.countryCode,
+      });
+      for (const r of results) {
+        if (r.code && !byCode.has(r.code)) byCode.set(r.code, r);
+      }
+    } catch {
+      /* try next query */
+    }
+  }
+  return [...byCode.values()];
+}
+
+/**
+ * Resolve a swap tip to a single catalog product (e.g. user tapped a recommendation).
+ * Merges results from multiple queries, then strict pick → looser name match.
+ */
+export async function findProductForSwapTip(
+  sourceProduct: ProductResult,
+  tip: LocalSwapTip,
+  profile: HealthProfile | null,
+): Promise<{ product: ProductResult; score: number; label: string } | null> {
+  const merged = await fetchCandidatesForSwapTip(sourceProduct, tip, profile);
+  if (merged.length === 0) return null;
+  return pickSwapProductFromCandidates(sourceProduct, tip, merged, new Set(), profile);
+}
+
+/** Minimum name/category overlap vs scanned product for a swap to count as same “aisle”. */
+export const SWAP_SIMILARITY_FLOOR = 0.14;
+
+/** 0–1: shared Open Food Facts categories + name token overlap with the scanned product. */
+export function productSimilarityToSource(source: ProductResult, candidate: ProductResult): number {
+  let score = 0;
+
+  const normTag = (t: string) => t.replace(/^[a-z]{2}:/i, "").toLowerCase();
+  const tagsA = (source.categories_tags ?? []).map(normTag);
+  const tagsB = new Set((candidate.categories_tags ?? []).map(normTag));
+  let catHits = 0;
+  for (const t of tagsA) {
+    if (!t) continue;
+    if (tagsB.has(t)) catHits += 1;
+    else {
+      for (const u of tagsB) {
+        if (t.length >= 6 && (u.includes(t) || t.includes(u))) {
+          catHits += 0.45;
+          break;
+        }
+      }
+    }
+  }
+  score += Math.min(0.55, catHits * 0.14);
+
+  const ta = new Set(tokenizeProductText(source.product_name ?? ""));
+  const tb = new Set(tokenizeProductText(candidate.product_name ?? ""));
+  if (ta.size > 0 && tb.size > 0) {
+    let inter = 0;
+    for (const x of ta) {
+      if (tb.has(x)) inter += 1;
+    }
+    const union = ta.size + tb.size - inter;
+    if (union > 0) score += 0.45 * (inter / union);
+  }
+
+  return Math.min(1, score);
+}
+
+type NutrientFallbackKind =
+  | "beverages"
+  | "snacks_sweet"
+  | "snacks_salty"
+  | "dairy"
+  | "bread_grains"
+  | "condiments"
+  | "frozen_meals"
+  | "unknown";
+
+function inferNutrientFallbackKind(product: ProductResult): NutrientFallbackKind {
+  const tags = (product.categories_tags ?? []).join(" ").toLowerCase();
+  const name = normalize(product.product_name ?? "");
+  const blob = `${tags} ${name}`;
+
+  if (
+    /\b(beverages|drink|juice|soda|soft-drink|tea|coffee|water|smoothie|milk)\b/.test(blob) ||
+    /\b(beverage|nectar|cola|energy-drink)\b/.test(tags)
+  ) {
+    return "beverages";
+  }
+  if (
+    /\b(chocolate|candy|confection|dessert|biscuit|cookie|cake|sweet-snack|spreads)\b/.test(blob)
+  ) {
+    return "snacks_sweet";
+  }
+  if (/\b(snack|chip|cracker|pretzel|salty-snack)\b/.test(blob)) return "snacks_salty";
+  if (/\b(dairy|yoghurt|yogurt|cheese|cream|butter|milk)\b/.test(blob)) return "dairy";
+  if (/\b(cereal|bread|pasta|rice|flour|breakfast)\b/.test(blob)) return "bread_grains";
+  if (/\b(sauce|dressing|condiment|spread|seasoning|vinegar)\b/.test(blob)) return "condiments";
+  if (/\b(frozen|ready-to-eat|microwave|pizza)\b/.test(blob)) return "frozen_meals";
+  return "unknown";
+}
+
+const NUTRIENT_FALLBACKS: Record<
+  NutrientFallbackKind,
+  { suggestion: string; reason: string }[]
+> = {
+  beverages: [
+    {
+      suggestion: "Spindrift Sparkling Water",
+      reason: "Same drink occasion, real fruit, no added sugar vs sugary beverages",
+    },
+    {
+      suggestion: "Olipop Vintage Cola",
+      reason: "Soda-like taste with minimal sugar and added fiber",
+    },
+  ],
+  snacks_sweet: [
+    {
+      suggestion: "Larabar Peanut Butter Cookie",
+      reason: "Sweet snack from dates and nuts — no added sugar, similar use as a treat",
+    },
+    {
+      suggestion: "Hu Kitchen Dark Chocolate Bar",
+      reason: "Chocolate category swap: less sugar, simple ingredients",
+    },
+  ],
+  snacks_salty: [
+    {
+      suggestion: "Siete Grain-Free Tortilla Chips",
+      reason: "Same crunchy snack occasion, better oils and simpler ingredients",
+    },
+    {
+      suggestion: "Simple Mills Almond Flour Crackers",
+      reason: "Savory snack swap without seed oils or refined flour",
+    },
+  ],
+  dairy: [
+    {
+      suggestion: "Siggi's Plain Icelandic Yogurt",
+      reason: "Same dairy aisle: high protein, much less sugar than sweetened options",
+    },
+    {
+      suggestion: "Good Culture Low-Fat Cottage Cheese",
+      reason: "High protein dairy snack, minimal ingredients",
+    },
+  ],
+  bread_grains: [
+    {
+      suggestion: "Dave's Killer Bread Thin-Sliced",
+      reason: "Same bread/grain occasion with more whole grains and fiber",
+    },
+    {
+      suggestion: "Banza Chickpea Pasta",
+      reason: "Pasta-style meal with more protein and fiber, similar prep",
+    },
+  ],
+  condiments: [
+    {
+      suggestion: "Primal Kitchen Unsweetened Ketchup",
+      reason: "Same condiment role with no added sugar and cleaner oils",
+    },
+    {
+      suggestion: "Sir Kensington's Avocado Oil Mayo",
+      reason: "Spread/dressing swap with better fat profile",
+    },
+  ],
+  frozen_meals: [
+    {
+      suggestion: "Amy's Organic Light & Lean Bowl",
+      reason: "Frozen meal aisle: organic, simpler ingredients, controlled calories",
+    },
+    {
+      suggestion: "Saffron Road Chicken Tikka Masala",
+      reason: "Frozen entrée with cleaner protein and no artificial preservatives",
+    },
+  ],
+  unknown: [
+    {
+      suggestion: "RXBAR Chocolate Sea Salt",
+      reason: "Whole-food bar when macros are unclear — protein from eggs and nuts",
+    },
+    {
+      suggestion: "Simple Mills Almond Flour Crackers",
+      reason: "Versatile lower-ultraprocessed snack when category is ambiguous",
+    },
+  ],
+};
+
+function pushNutrientFallbackTips(
+  tips: LocalSwapTip[],
+  seen: Set<string>,
+  product: ProductResult,
+  displayName: string,
+  kind: NutrientFallbackKind,
+  options: { sugar?: number; sodium?: number; satFat?: number; fiber?: number; carbs?: number; protein?: number },
+): void {
+  const pool = NUTRIENT_FALLBACKS[kind];
+  const hint = categorySearchHint(product);
+  const ctx = (hint || kind.replace(/_/g, " ")).trim() || displayName.slice(0, 28).trim();
+
+  const tryPush = (suggestion: string, reason: string) => {
+    const key = `${displayName}→${suggestion}`;
+    if (seen.has(key) || tips.length >= 4) return;
+    seen.add(key);
+    tips.push({
+      original: displayName,
+      suggestion,
+      reason,
+      searchContext: ctx,
+    });
+  };
+
+  if (options.sugar != null && options.sugar > 15) {
+    const s = pool[0];
+    if (s) tryPush(s.suggestion, `${s.reason} (this product ~${Math.round(options.sugar)}g sugar / 100g)`);
+  }
+  if (options.sodium != null && options.sodium > 600) {
+    const s = pool[1] ?? pool[0];
+    if (s)
+      tryPush(
+        s.suggestion,
+        `${s.reason} (this product ~${Math.round(options.sodium)}mg sodium / 100g)`,
+      );
+  }
+  if (options.satFat != null && options.satFat > 8) {
+    const s = pool[0];
+    if (s)
+      tryPush(
+        s.suggestion,
+        `${s.reason} (this product ~${Math.round(options.satFat)}g sat fat / 100g)`,
+      );
+  }
+  if (
+    options.fiber != null &&
+    options.fiber < 2 &&
+    options.carbs != null &&
+    options.carbs > 15
+  ) {
+    const s = kind === "bread_grains" ? pool[0] : NUTRIENT_FALLBACKS.bread_grains[0];
+    tryPush(
+      s.suggestion,
+      `${s.reason} — more fiber than this product`,
+    );
+  }
+  if (options.protein != null && options.protein > 10 && tips.length < 2) {
+    const s = pool[1] ?? pool[0];
+    if (s) tryPush(s.suggestion, `${s.reason} — complements higher-protein items like this`);
+  }
+  if (tips.length === 0) {
+    for (const s of pool.slice(0, 2)) {
+      tryPush(s.suggestion, s.reason);
+      if (tips.length >= 2) break;
+    }
+  }
 }
 
 // ─── API-based swap recommendations ─────────────────────────────────────────
@@ -546,6 +1098,11 @@ export async function getSwapRecommendations(
     queries = [parsedBrand && productTerms ? `${productTerms} ${parsedBrand}` : q];
   }
 
+  const hint = categorySearchHint(current);
+  if (hint) {
+    queries = queries.map((q) => `${q} ${hint}`.replace(/\s+/g, " ").trim().slice(0, 130));
+  }
+
   const allResults: ProductResult[] = [];
 
   const searchPromises = queries.slice(0, 3).map(async (searchQuery) => {
@@ -570,15 +1127,16 @@ export async function getSwapRecommendations(
     return true;
   });
 
-  const ranked = filtered
-    .map((p) => {
-      const analysis = analyzeProduct(profile, p);
-      return { product: p, score: analysis.overallScore, label: analysis.overallLabel };
-    })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, max);
-
-  return ranked;
+  const scored = filtered.map((p) => {
+    const analysis = analyzeProduct(profile, p);
+    const sim = productSimilarityToSource(current, p);
+    const combined = analysis.overallScore * 0.52 + sim * 100 * 0.48;
+    return { product: p, score: analysis.overallScore, label: analysis.overallLabel, combined, sim };
+  });
+  scored.sort((a, b) => b.combined - a.combined);
+  const pool = scored.filter((x) => x.sim >= SWAP_SIMILARITY_FLOOR);
+  const pick = pool.length > 0 ? pool : scored;
+  return pick.slice(0, max).map(({ product, score, label }) => ({ product, score, label }));
 }
 
 export function makeSwapScanResult(

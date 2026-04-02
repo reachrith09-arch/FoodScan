@@ -1,5 +1,4 @@
 import { useFocusEffect } from "@react-navigation/native";
-import { useRouter } from "expo-router";
 import * as React from "react";
 import {
   Alert,
@@ -29,7 +28,6 @@ import { useSubscription } from "@/lib/revenuecat";
 const HEADER_HIDE_OFFSET = 140;
 
 export default function SettingsScreen() {
-  const router = useRouter();
   const { isPro, showPaywall } = useSubscription();
   const { setColorScheme: setNativeWindScheme } = useNativeWindScheme();
   const insets = useSafeAreaInsets();
@@ -114,10 +112,10 @@ export default function SettingsScreen() {
 
   const handleExport = async () => {
     try {
-      const json = await exportUserData();
+      const message = await exportUserData();
       try {
         await Share.share({
-          message: json,
+          message,
           title: "FoodScan data export",
         });
       } catch {
@@ -193,25 +191,6 @@ export default function SettingsScreen() {
           </CardContent>
         </Card>
       )}
-
-      <Pressable
-        onPress={() => router.push("/paywall-test")}
-        style={({ pressed }) => ({
-          opacity: pressed ? 0.7 : 1,
-          marginBottom: 16,
-          paddingVertical: 12,
-          paddingHorizontal: 16,
-          borderRadius: 10,
-          borderWidth: 1,
-          borderColor: THEME.primary + "66",
-          backgroundColor: THEME.primary + "11",
-          alignSelf: "flex-start",
-        })}
-      >
-        <RNText style={[{ fontSize: 14, fontWeight: "600" }, { color: THEME.primary }]}>
-          Test paywall
-        </RNText>
-      </Pressable>
 
       <Card className="mb-4">
         <CardHeader className="pb-1">
@@ -297,7 +276,7 @@ export default function SettingsScreen() {
         <CardHeader className="pb-1">
           <CardTitle style={textWhite}>Data</CardTitle>
           <Text className="text-sm text-muted-foreground" style={textMuted}>
-            Export a summary of your profile and settings (no scan data). For full backup, use your device backup.
+            Share a short, readable summary of your profile and activity (no raw data file). For full backup, use your device backup.
           </Text>
         </CardHeader>
         <CardContent className="pt-0">

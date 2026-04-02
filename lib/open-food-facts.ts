@@ -1,5 +1,6 @@
 import type { ProductResult } from "@/types/food";
 import { addPendingBarcode, cacheProduct, getCachedProduct, isOnline } from "@/lib/offline";
+import { getScanHistory } from "@/lib/storage";
 
 const BASE_URL = "https://world.openfoodfacts.org";
 const BASE_ALT = "https://world.openfoodfacts.net";
@@ -651,7 +652,6 @@ export async function getPopularProductsInCountry(
   try {
     const online = await isOnline().catch(() => false);
     if (!online) {
-      const { getScanHistory } = await import("@/lib/storage");
       const history = await getScanHistory();
       const products = history.map((r) => r.product).filter((p) => p?.product_name);
       return products.slice(0, pageSize);

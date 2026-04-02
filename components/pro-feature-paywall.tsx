@@ -1,8 +1,7 @@
 import * as React from "react";
-import { ActivityIndicator, Pressable, useColorScheme, View } from "react-native";
+import { ActivityIndicator, Pressable, Text as RNText, useColorScheme, View } from "react-native";
 import { Sparkles, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Button } from "@/components/ui/button.native";
 import { Text } from "@/components/ui/text";
 import { THEME } from "@/lib/theme";
 
@@ -28,8 +27,11 @@ export function ProFeaturePaywall({
   const [unlocking, setUnlocking] = React.useState(false);
 
   const bg = isDark ? "#000000" : THEME.bgLight;
-  const textWhite = isDark ? { color: "#ffffff" as const } : undefined;
-  const textMuted = isDark ? { color: "#a1a1aa" as const } : undefined;
+  /** Inline colors only — dark-mode CSS tokens set primary to white / foreground to black, which can leave native buttons as black-on-black. */
+  const titleColor = isDark ? "#ffffff" : THEME.darkGrey;
+  const subtitleColor = isDark ? "#cbd5e1" : THEME.mutedGrey;
+  const cardBodyColor = isDark ? "#f1f5f9" : "#1e293b";
+  const labelMuted = isDark ? "#94a3b8" : THEME.mutedGrey;
 
   const handleUnlock = React.useCallback(async () => {
     setUnlocking(true);
@@ -70,10 +72,10 @@ export function ProFeaturePaywall({
           <Sparkles size={32} color={THEME.primary} strokeWidth={2} />
         </View>
 
-        <Text className="text-center text-2xl font-bold" style={textWhite}>
+        <Text className="text-center text-2xl font-bold" style={{ color: titleColor }}>
           {title}
         </Text>
-        <Text className="mt-2 text-center text-base leading-6 text-muted-foreground" style={textMuted}>
+        <Text className="mt-2 text-center text-base leading-6" style={{ color: subtitleColor }}>
           {subtitle}
         </Text>
 
@@ -88,28 +90,41 @@ export function ProFeaturePaywall({
             ...THEME.shadowCard,
           }}
         >
-          <Text className="text-xs font-semibold uppercase tracking-wide text-muted-foreground" style={textMuted}>
+          <Text className="text-xs font-semibold uppercase tracking-wide" style={{ color: labelMuted }}>
             {featureName}
           </Text>
-          <Text className="mt-2 text-sm leading-6" style={textWhite}>
+          <Text className="mt-3 text-base leading-6" style={{ color: cardBodyColor, fontWeight: "500" }}>
             {description}
           </Text>
         </View>
 
-        <Button
-          className="mt-8 h-12 rounded-xl"
+        <Pressable
           onPress={handleUnlock}
           disabled={unlocking}
+          accessibilityRole="button"
+          accessibilityLabel="Unlock with FoodScan Pro"
+          style={({ pressed }) => ({
+            marginTop: 28,
+            minHeight: 52,
+            borderRadius: 14,
+            backgroundColor: THEME.primary,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingVertical: 14,
+            paddingHorizontal: 20,
+            opacity: unlocking ? 0.65 : pressed ? 0.92 : 1,
+            ...THEME.shadowButton,
+          })}
         >
           {unlocking ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={THEME.white} />
           ) : (
-            <Text className="font-semibold text-primary-foreground">Unlock with FoodScan Pro</Text>
+            <RNText style={{ color: THEME.white, fontSize: 17, fontWeight: "700" }}>Unlock with FoodScan Pro</RNText>
           )}
-        </Button>
+        </Pressable>
 
         <Pressable onPress={onClose} className="mt-4 py-2" accessibilityRole="button">
-          <Text className="text-center text-sm text-muted-foreground" style={textMuted}>
+          <Text className="text-center text-sm" style={{ color: subtitleColor }}>
             Not now
           </Text>
         </Pressable>
