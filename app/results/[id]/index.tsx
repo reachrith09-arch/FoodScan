@@ -37,7 +37,6 @@ import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
 import { getContextNote, getScanContext } from "@/lib/context-aware";
 import { getDisplayProductName } from "@/lib/product-display";
-import { confidenceLabel } from "@/lib/recognize-food";
 import { useSubscription } from "@/lib/revenuecat";
 import {
   getScanResultSubtitle,
@@ -468,82 +467,6 @@ export default function ResultIndexScreen() {
             </Pressable>
           ))}
         </View>
-
-        {scannedMeal &&
-          display.mealIngredients &&
-          display.mealIngredients.length > 0 && (
-            <Card
-              className="mt-1"
-              style={{
-                backgroundColor: isDark ? "#0a0a0a" : "#ffffff",
-                borderWidth: 1,
-                borderColor: isDark ? "#262626" : "#e5e7eb",
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.05,
-                shadowRadius: 6,
-                elevation: 2,
-              }}
-            >
-              <CardHeader className="pb-2">
-                <CardTitle style={[textWhite, { fontSize: 16 }]}>
-                  Your ingredients
-                </CardTitle>
-                <Text
-                  className="text-muted-foreground text-xs leading-4"
-                  style={textMuted}
-                >
-                  Same lines you confirmed after AI scan (add or remove items
-                  there before scoring).
-                </Text>
-              </CardHeader>
-              <CardContent className="pt-0">
-                {display.mealIngredients.map((line, idx) => (
-                  <View
-                    key={`${line.name}-${idx}`}
-                    style={{
-                      paddingVertical: 12,
-                      borderTopWidth: idx > 0 ? 1 : 0,
-                      borderTopColor: isDark ? "#262626" : "#f4f4f5",
-                    }}
-                  >
-                    <Text
-                      className="font-medium text-base text-foreground"
-                      style={textWhite}
-                    >
-                      {line.name}
-                    </Text>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        flexWrap: "wrap",
-                        gap: 8,
-                        marginTop: 4,
-                      }}
-                    >
-                      {line.portion ? (
-                        <Text
-                          className="text-muted-foreground text-sm"
-                          style={textMuted}
-                        >
-                          {line.portion}
-                        </Text>
-                      ) : null}
-                      {line.confidence != null ? (
-                        <Text
-                          className="text-muted-foreground text-sm"
-                          style={textMuted}
-                        >
-                          {line.confidence}% ·{" "}
-                          {confidenceLabel(line.confidence)}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </View>
-                ))}
-              </CardContent>
-            </Card>
-          )}
 
         {fav && display && (
           <View className="mt-3">

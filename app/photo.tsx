@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "@/components/ui/button.native";
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
+import { confidenceColor, confidenceLabel } from "@/lib/confidence-label";
 import {
   computeMealScore,
   defaultPortionForFood,
@@ -31,8 +32,6 @@ import {
   parsePortionToGrams,
 } from "@/lib/meal-score";
 import {
-  confidenceColor,
-  confidenceLabel,
   isFoodRecognitionAvailable,
   ratioToPortionString,
   recognizeMealFromImage,

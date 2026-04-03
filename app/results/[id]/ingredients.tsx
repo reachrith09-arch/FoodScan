@@ -13,12 +13,12 @@ import { IngredientsDropdown } from "@/components/ingredients-dropdown";
 import { ResultHeader } from "@/components/result-header";
 import { Button } from "@/components/ui/button.native";
 import { Text } from "@/components/ui/text";
+import { confidenceLabel } from "@/lib/confidence-label";
 import {
   getDisplayIngredientsFromProduct,
   getIngredientDetail,
 } from "@/lib/ingredients";
 import { lookupProductOnline } from "@/lib/lookup-product-online";
-import { confidenceLabel } from "@/lib/recognize-food";
 import { isScannedMeal } from "@/lib/scan-display";
 import { getHealthProfile } from "@/lib/storage";
 import { THEME } from "@/lib/theme";
