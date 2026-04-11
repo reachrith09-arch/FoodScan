@@ -13,6 +13,7 @@ import * as React from "react";
 import {
   ActivityIndicator,
   Image,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -20,9 +21,14 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AiThirdPartyConsentPanel } from "@/components/ai-third-party-consent-panel";
 import { Button } from "@/components/ui/button.native";
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
+import {
+  getAiThirdPartySharingConsent,
+  setAiThirdPartySharingConsent,
+} from "@/lib/ai-third-party-consent";
 import { confidenceColor, confidenceLabel } from "@/lib/confidence-label";
 import {
   computeMealScore,
@@ -126,6 +132,27 @@ export default function PhotoScreen() {
   >(null);
   const visionEnabled = isFoodRecognitionAvailable();
   const recognitionGen = React.useRef(0);
+  const pendingAfterVisionConsent = React.useRef<(() => void) | null>(null);
+  const [visionConsentOpen, setVisionConsentOpen] = React.useState(false);
+  const [visionConsentBusy, setVisionConsentBusy] = React.useState(false);
+
+  const runAfterVisionConsent = React.useCallback(
+    (fn: () => void) => {
+      void (async () => {
+        if (!visionEnabled) {
+          fn();
+          return;
+        }
+        if (await getAiThirdPartySharingConsent()) {
+          fn();
+          return;
+        }
+        pendingAfterVisionConsent.current = fn;
+        setVisionConsentOpen(true);
+      })();
+    },
+    [visionEnabled],
+  );
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -349,11 +376,12 @@ export default function PhotoScreen() {
   }, [loading, handlePickedAsset]);
 
   const reAnalyze = () => {
-    if (imageBase64) {
+    if (!imageBase64) return;
+    runAfterVisionConsent(() => {
       setAnalyzingHintIndex(0);
       setStep("analyzing");
       runRecognition(imageBase64);
-    }
+    });
   };
 
   const cancelAnalyzing = () => {
@@ -568,7 +596,7 @@ export default function PhotoScreen() {
         <Text style={[styles.errorText, { marginBottom: 12 }]}>{error}</Text>
       ) : null}
       <Button
-        onPress={() => void startAiAnalysis()}
+        onPress={() => runAfterVisionConsent(() => void startAiAnalysis())}
         style={[styles.takePhotoButton, THEME.shadowButton]}
       >
         <UtensilsCrossed size={22} color="#fff" style={{ marginRight: 10 }} />
@@ -959,40 +987,84 @@ export default function PhotoScreen() {
     </View>
   );
 
+  const visionConsentModal = (
+    <Modal
+      visible={visionConsentOpen}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={() => {
+        pendingAfterVisionConsent.current = null;
+        setVisionConsentOpen(false);
+      }}
+    >
+      <View
+        style={{ flex: 1, backgroundColor: bgColor, paddingTop: insets.top }}
+      >
+        <AiThirdPartyConsentPanel
+          variant="meal_vision"
+          isDark={isDark}
+          busy={visionConsentBusy}
+          onDecline={() => {
+            pendingAfterVisionConsent.current = null;
+            setVisionConsentOpen(false);
+          }}
+          onAgree={async () => {
+            setVisionConsentBusy(true);
+            try {
+              await setAiThirdPartySharingConsent(true);
+              setVisionConsentOpen(false);
+              const next = pendingAfterVisionConsent.current;
+              pendingAfterVisionConsent.current = null;
+              next?.();
+            } finally {
+              setVisionConsentBusy(false);
+            }
+          }}
+        />
+      </View>
+    </Modal>
+  );
+
   if (step === "analyzing") {
     return (
-      <View style={[styles.container, { backgroundColor: bgColor }]}>
-        {renderAnalyzingScreen()}
-      </View>
+      <>
+        <View style={[styles.container, { backgroundColor: bgColor }]}>
+          {renderAnalyzingScreen()}
+        </View>
+        {visionConsentModal}
+      </>
     );
   }
 
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: bgColor }]}
-      contentContainerStyle={{
-        paddingTop: insets.top + 16,
-        paddingBottom: insets.bottom + 32,
-      }}
-      keyboardShouldPersistTaps="handled"
-    >
-      <View style={styles.content}>
-        {step === "capture" && renderCaptureStep()}
-        {step === "preview" && renderPreviewStep()}
-        {step === "review" && renderReviewStep()}
-        {step === "calculating" && renderCalculatingStep()}
+    <>
+      <ScrollView
+        style={[styles.container, { backgroundColor: bgColor }]}
+        contentContainerStyle={{
+          paddingTop: insets.top + 16,
+          paddingBottom: insets.bottom + 32,
+        }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.content}>
+          {step === "capture" && renderCaptureStep()}
+          {step === "preview" && renderPreviewStep()}
+          {step === "review" && renderReviewStep()}
+          {step === "calculating" && renderCalculatingStep()}
 
-        {step !== "calculating" ? (
-          <Button
-            variant="ghost"
-            style={styles.cancelBtn}
-            onPress={() => router.back()}
-          >
-            <Text style={{ color: THEME.mutedGrey }}>Cancel</Text>
-          </Button>
-        ) : null}
-      </View>
-    </ScrollView>
+          {step !== "calculating" ? (
+            <Button
+              variant="ghost"
+              style={styles.cancelBtn}
+              onPress={() => router.back()}
+            >
+              <Text style={{ color: THEME.mutedGrey }}>Cancel</Text>
+            </Button>
+          ) : null}
+        </View>
+      </ScrollView>
+      {visionConsentModal}
+    </>
   );
 }
 

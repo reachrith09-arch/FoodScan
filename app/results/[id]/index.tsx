@@ -27,7 +27,6 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ExpandableSection } from "@/components/expandable-section";
 import { FoodAssistantChat } from "@/components/food-assistant-chat";
 import { ScoreGauge } from "@/components/graphics/score-gauge";
 import { SubscoreBars } from "@/components/graphics/subscore-bars";
@@ -582,20 +581,30 @@ export default function ResultIndexScreen() {
                   />
                 </View>
               </View>
-              <ExpandableSection
-                title="Why this score?"
-                defaultOpen={false}
-                isDark={isDark}
+              <Pressable
+                onPress={() => router.push("/(tabs)/settings")}
+                style={({ pressed }) => ({
+                  marginTop: 4,
+                  paddingVertical: 12,
+                  paddingHorizontal: 14,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: isDark ? "#404040" : "#e4e4e7",
+                  backgroundColor: isDark ? "#18181b" : "#fafafa",
+                  opacity: pressed ? 0.85 : 1,
+                })}
               >
                 <Text
-                  className="text-muted-foreground text-sm"
+                  className="text-muted-foreground text-sm leading-5"
                   style={textMuted}
                 >
-                  {scannedMeal
-                    ? "Each ingredient is modeled with typical nutrition for its category, then blended by portion. Additives and processing reflect that combined estimate."
-                    : "The score combines allergens, nutrition, additives, processing, and how well it fits your diet and profile."}
+                  Citations and official sources for this score are in{" "}
+                  <Text style={{ color: THEME.primary, fontWeight: "600" }}>
+                    Settings → Health information sources
+                  </Text>
+                  .
                 </Text>
-              </ExpandableSection>
+              </Pressable>
               <View className="mt-2">
                 <Text
                   className="mb-3 font-medium text-foreground text-sm"

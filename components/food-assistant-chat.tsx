@@ -1,6 +1,7 @@
 import { Crown } from "lucide-react-native";
 import * as React from "react";
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -9,11 +10,17 @@ import {
   useColorScheme,
   View,
 } from "react-native";
+import { AiThirdPartyConsentPanel } from "@/components/ai-third-party-consent-panel";
 import { ChatTypingIndicator } from "@/components/chat-typing-indicator";
 import { FoodBuddyMascot } from "@/components/food-buddy-mascot";
 import { Button } from "@/components/ui/button.native";
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
+import {
+  getAiThirdPartySharingConsent,
+  isCloudFoodAssistantAvailable,
+  setAiThirdPartySharingConsent,
+} from "@/lib/ai-third-party-consent";
 import { answerFoodQuestion } from "@/lib/food-assistant";
 import { getReactionSummaryForAdvice } from "@/lib/reactions";
 import { useSubscription } from "@/lib/revenuecat";
@@ -57,6 +64,38 @@ export function FoodAssistantChat(props: {
     if (opening && !canUseAssistant) setAssistantUnlocked(false);
   }, [props.visible, canUseAssistant]);
   const allowAssistant = canUseAssistant || assistantUnlocked;
+  const needsCloudAssistant = isCloudFoodAssistantAvailable();
+  const [assistantConsentReady, setAssistantConsentReady] =
+    React.useState(false);
+  const [hasAssistantAiConsent, setHasAssistantAiConsent] =
+    React.useState(false);
+  const [assistantConsentBusy, setAssistantConsentBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!props.visible) {
+      setAssistantConsentReady(false);
+      return;
+    }
+    if (!allowAssistant) return;
+    let cancelled = false;
+    void (async () => {
+      if (!needsCloudAssistant) {
+        if (!cancelled) {
+          setHasAssistantAiConsent(true);
+          setAssistantConsentReady(true);
+        }
+        return;
+      }
+      const c = await getAiThirdPartySharingConsent();
+      if (!cancelled) {
+        setHasAssistantAiConsent(c);
+        setAssistantConsentReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [props.visible, allowAssistant, needsCloudAssistant]);
 
   const handleUnlockPro = React.useCallback(async () => {
     const ok = await showPaywall({ forceShow: true });
@@ -279,6 +318,36 @@ export function FoodAssistantChat(props: {
               </Text>
             </Pressable>
           </View>
+        ) : !assistantConsentReady ? (
+          <View
+            style={{
+              flex: 1,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: bg,
+            }}
+          >
+            <ActivityIndicator
+              size="large"
+              color={isDark ? "#a1a1aa" : "#71717a"}
+            />
+          </View>
+        ) : needsCloudAssistant && !hasAssistantAiConsent ? (
+          <AiThirdPartyConsentPanel
+            variant="assistant"
+            isDark={isDark}
+            busy={assistantConsentBusy}
+            onDecline={props.onClose}
+            onAgree={async () => {
+              setAssistantConsentBusy(true);
+              try {
+                await setAiThirdPartySharingConsent(true);
+                setHasAssistantAiConsent(true);
+              } finally {
+                setAssistantConsentBusy(false);
+              }
+            }}
+          />
         ) : (
           <>
             <ScrollView
