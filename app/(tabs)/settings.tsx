@@ -412,8 +412,8 @@ export default function SettingsScreen() {
                 Health information sources
               </CardTitle>
               <Text className="text-muted-foreground text-sm" style={textMuted}>
-                Official references behind nutrition guidance and health scores
-                (opens in your browser).
+                Expand below for how we calculate health scores and links to
+                official sources (opens in your browser).
               </Text>
             </CardHeader>
             <CardContent className="pt-0">

@@ -137,11 +137,11 @@ export default function HealthScreen() {
           })}
         >
           <Text className="text-sm leading-5" style={textMuted}>
-            Citations and official sources are in{" "}
+            Citations and how we calculate scores are in{" "}
             <Text style={{ color: THEME.primary, fontWeight: "600" }}>
               Settings → Health information sources
             </Text>
-            .
+            — expand “Show score calculation & sources”.
           </Text>
         </Pressable>
         {healthRisks.length > 0 ? (

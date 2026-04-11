@@ -598,11 +598,11 @@ export default function ResultIndexScreen() {
                   className="text-muted-foreground text-sm leading-5"
                   style={textMuted}
                 >
-                  Citations and official sources for this score are in{" "}
+                  How we calculate scores and links to official sources are in{" "}
                   <Text style={{ color: THEME.primary, fontWeight: "600" }}>
                     Settings → Health information sources
                   </Text>
-                  .
+                  (expand “Show score calculation & sources”).
                 </Text>
               </Pressable>
               <View className="mt-2">
