@@ -139,7 +139,7 @@ export default function ScannerScreen() {
   }
 
   if (!permission.granted) {
-    const handleGrantPermission = () => {
+    const handleContinueToSystemPermission = () => {
       setPermissionError(null);
       setRequestingPermission(true);
       requestPermission()
@@ -171,7 +171,7 @@ export default function ScannerScreen() {
         )}
         <TouchableOpacity
           style={[styles.grantPermissionButton, requestingPermission && styles.grantPermissionButtonDisabled]}
-          onPress={handleGrantPermission}
+          onPress={handleContinueToSystemPermission}
           disabled={requestingPermission}
           activeOpacity={0.8}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -179,7 +179,7 @@ export default function ScannerScreen() {
           {requestingPermission ? (
             <ActivityIndicator size="small" color="#fff" />
           ) : (
-            <Text style={styles.grantPermissionButtonText}>Grant permission</Text>
+            <Text style={styles.grantPermissionButtonText}>Continue</Text>
           )}
         </TouchableOpacity>
         {(permissionError || !canAskAgain) && (

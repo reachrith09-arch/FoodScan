@@ -19,7 +19,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const openAiVisionModel = process.env.EXPO_PUBLIC_OPENAI_VISION_MODEL?.trim() ?? "";
   const openAiVisionFallback = process.env.EXPO_PUBLIC_OPENAI_VISION_FALLBACK?.trim() ?? "";
   const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() ?? "";
-  const supabaseAnon = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? "";
+  const supabaseAnon =
+    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim() ??
+    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_?.trim() ??
+    "";
 
   return {
     ...appJson.expo,
