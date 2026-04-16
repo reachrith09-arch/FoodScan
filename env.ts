@@ -17,6 +17,11 @@ export const envSchema = z.object({
    */
   EXPO_PUBLIC_OPENAI_VISION_FALLBACK: z.string().optional(),
   EXPO_PUBLIC_REVENUECAT_API_KEY: z.string().optional(),
+  /**
+   * Dev builds only: when `"1"` / `"true"`, treat the user as FoodScan Pro (no RevenueCat purchase).
+   * Ignored in production (`__DEV__` is false). Never ship a release with this set.
+   */
+  EXPO_PUBLIC_DEV_UNLOCK_PRO: z.string().optional(),
   /** RevenueCat offering identifier that has your Paywall attached (defaults to Current offering if unset). */
   EXPO_PUBLIC_REVENUECAT_OFFERING_ID: z.string().optional(),
   /**
@@ -32,6 +37,7 @@ type Extra = {
   expoPublicOpenAiVisionFallback?: string;
   expoPublicSupabaseUrl?: string;
   expoPublicSupabaseAnonKey?: string;
+  expoPublicDevUnlockPro?: string;
   revenueCatApiKey?: string;
   revenueCatOfferingId?: string;
   revenueCatEntitlementId?: string;
@@ -76,6 +82,10 @@ export const env = envSchema.parse({
   EXPO_PUBLIC_REVENUECAT_API_KEY:
     process.env.EXPO_PUBLIC_REVENUECAT_API_KEY?.trim() ||
     extra()?.revenueCatApiKey?.trim() ||
+    undefined,
+  EXPO_PUBLIC_DEV_UNLOCK_PRO:
+    process.env.EXPO_PUBLIC_DEV_UNLOCK_PRO?.trim() ||
+    extra()?.expoPublicDevUnlockPro?.trim() ||
     undefined,
   EXPO_PUBLIC_REVENUECAT_OFFERING_ID:
     process.env.EXPO_PUBLIC_REVENUECAT_OFFERING_ID?.trim() ||

@@ -414,10 +414,10 @@ function mealVisionHasContent(r: MealRecognitionResult): boolean {
 
 /**
  * Recognize dish + ingredients.
- * 1) **Direct OpenAI** when `EXPO_PUBLIC_OPENAI_API_KEY` is set (uses your account credits immediately).
- * 2) If that returns empty/error and Supabase is configured, **Edge `recognize-food`** next.
- * 3) If Edge reports quota / `EXPO_PUBLIC_OPENAI_VISION_FALLBACK=1`, retry client OpenAI from Edge handlers.
- * 4) If only Supabase (no client key), Edge runs first as before.
+ * 1) **Direct OpenAI** when `EXPO_PUBLIC_OPENAI_API_KEY` is set (uses your key first).
+ * 2) If the result is empty or only errors, **Supabase Edge `recognize-food`** runs when configured.
+ * 3) On Edge quota errors (or `EXPO_PUBLIC_OPENAI_VISION_FALLBACK=1`), may retry client OpenAI if not already tried.
+ * 4) With no client key, only Edge runs.
  */
 export async function recognizeMealFromImage(
   imageBase64: string,

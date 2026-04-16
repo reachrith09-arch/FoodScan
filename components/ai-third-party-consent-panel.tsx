@@ -7,6 +7,7 @@ import {
 } from "react-native";
 import { Button } from "@/components/ui/button.native";
 import { Text } from "@/components/ui/text";
+import { THEME } from "@/lib/theme";
 
 const OPENAI_PRIVACY = "https://openai.com/policies/privacy-policy";
 
@@ -37,60 +38,71 @@ export function AiThirdPartyConsentPanel(props: {
     "Exact endpoints, other subprocessors (including web search where used), retention, and legal bases are described in FoodScan's privacy policy on the App Store.";
 
   return (
-    <ScrollView
-      style={{ flex: 1 }}
-      contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-      keyboardShouldPersistTaps="handled"
-    >
-      <Text style={{ fontSize: 18, fontWeight: "700", color: textMain }}>
-        {variant === "meal_vision" ? "Meal photo & AI" : "Sprout & AI"}
-      </Text>
+    <View style={{ flex: 1 }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: 20, paddingBottom: 12 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={{ fontSize: 18, fontWeight: "700", color: textMain }}>
+          {variant === "meal_vision" ? "Meal photo & AI" : "Sprout & AI"}
+        </Text>
+
+        <View
+          style={{
+            marginTop: 16,
+            padding: 14,
+            borderRadius: 12,
+            backgroundColor: cardBg,
+            borderWidth: 1,
+            borderColor,
+            gap: 12,
+          }}
+        >
+          <Text style={{ fontSize: 14, lineHeight: 21, color: textMain }}>
+            • {what}
+          </Text>
+          <Text style={{ fontSize: 14, lineHeight: 21, color: textMain }}>
+            • {who}
+          </Text>
+          <Text style={{ fontSize: 14, lineHeight: 21, color: textMuted }}>
+            • {policy}
+          </Text>
+        </View>
+
+        <Text
+          style={{
+            marginTop: 14,
+            fontSize: 13,
+            lineHeight: 20,
+            color: textMuted,
+          }}
+        >
+          If you do not agree, we will not send your data for this feature. You
+          can turn AI sharing off anytime in Settings → Third-party AI.
+        </Text>
+
+        <Pressable
+          onPress={() => void Linking.openURL(OPENAI_PRIVACY)}
+          style={{ marginTop: 12, paddingVertical: 8 }}
+        >
+          <Text style={{ fontSize: 14, color: "#2563eb", fontWeight: "600" }}>
+            {`OpenAI privacy policy \u2197`}
+          </Text>
+        </Pressable>
+      </ScrollView>
 
       <View
         style={{
-          marginTop: 16,
-          padding: 14,
-          borderRadius: 12,
-          backgroundColor: cardBg,
-          borderWidth: 1,
-          borderColor,
+          paddingHorizontal: 20,
+          paddingTop: 8,
+          paddingBottom: 20,
           gap: 12,
+          borderTopWidth: 1,
+          borderTopColor: borderColor,
+          backgroundColor: isDark ? THEME.darkBg : THEME.bgLight,
         }}
       >
-        <Text style={{ fontSize: 14, lineHeight: 21, color: textMain }}>
-          • {what}
-        </Text>
-        <Text style={{ fontSize: 14, lineHeight: 21, color: textMain }}>
-          • {who}
-        </Text>
-        <Text style={{ fontSize: 14, lineHeight: 21, color: textMuted }}>
-          • {policy}
-        </Text>
-      </View>
-
-      <Text
-        style={{
-          marginTop: 14,
-          fontSize: 13,
-          lineHeight: 20,
-          color: textMuted,
-        }}
-      >
-        If you do not agree, we will not send your data for this feature. You
-        can withdraw consent in Settings; you will be asked again before the
-        next send.
-      </Text>
-
-      <Pressable
-        onPress={() => void Linking.openURL(OPENAI_PRIVACY)}
-        style={{ marginTop: 12, paddingVertical: 8 }}
-      >
-        <Text style={{ fontSize: 14, color: "#2563eb", fontWeight: "600" }}>
-          {`OpenAI privacy policy \u2197`}
-        </Text>
-      </Pressable>
-
-      <View style={{ marginTop: 24, gap: 12 }}>
         <Button
           onPress={() => void Promise.resolve(onAgree())}
           disabled={busy}
@@ -113,6 +125,6 @@ export function AiThirdPartyConsentPanel(props: {
           <Text className="font-medium text-foreground">Not now</Text>
         </Button>
       </View>
-    </ScrollView>
+    </View>
   );
 }

@@ -37,6 +37,13 @@ function resolveEntitlementId(): string {
   );
 }
 
+/** Dev only: env flag treats user as Pro without a RevenueCat purchase. */
+function isDevFoodscanProBypass(): boolean {
+  if (!__DEV__) return false;
+  const v = env.EXPO_PUBLIC_DEV_UNLOCK_PRO?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 function pickPaywallOffering(
   offerings: Awaited<ReturnType<typeof Purchases.getOfferings>>,
   preferredId: string | undefined,
@@ -259,7 +266,8 @@ export function SubscriptionProvider({
 
   const checkEntitlement = React.useCallback(
     (info: CustomerInfo) => {
-      const unlocked = entitlementUnlocked(info, entitlementId);
+      const unlocked =
+        entitlementUnlocked(info, entitlementId) || isDevFoodscanProBypass();
       if (__DEV__ && !unlocked && Object.keys(info.entitlements.active).length > 0) {
         console.warn(
           "[RevenueCat] No Pro unlock for entitlement",
@@ -291,6 +299,11 @@ export function SubscriptionProvider({
   );
 
   React.useEffect(() => {
+    if (isDevFoodscanProBypass()) {
+      isProRef.current = true;
+      setIsPro(true);
+      return;
+    }
     void AsyncStorage.getItem(PRO_UNLOCKED_CACHE_KEY).then((v) => {
       if (v !== "1" || revenueCatConfiguredRef.current) return;
       isProRef.current = true;
@@ -324,14 +337,23 @@ export function SubscriptionProvider({
     }
     if (!apiKey) {
       revenueCatConfiguredRef.current = true;
-      void AsyncStorage.removeItem(PRO_UNLOCKED_CACHE_KEY).catch(() => {});
-      isProRef.current = false;
-      setIsPro(false);
+      if (isDevFoodscanProBypass()) {
+        isProRef.current = true;
+        setIsPro(true);
+      } else {
+        void AsyncStorage.removeItem(PRO_UNLOCKED_CACHE_KEY).catch(() => {});
+        isProRef.current = false;
+        setIsPro(false);
+      }
       setLoading(false);
       return;
     }
     if (Platform.OS !== "ios" && Platform.OS !== "android") {
       revenueCatConfiguredRef.current = true;
+      if (isDevFoodscanProBypass()) {
+        isProRef.current = true;
+        setIsPro(true);
+      }
       setLoading(false);
       return;
     }
@@ -343,6 +365,10 @@ export function SubscriptionProvider({
       setRevenueCatDiagnostic((d) => ({ ...d, lastInitError: msg }));
       if (__DEV__) {
         console.warn("[RevenueCat]", msg);
+      }
+      if (isDevFoodscanProBypass()) {
+        isProRef.current = true;
+        setIsPro(true);
       }
       setLoading(false);
       return;
@@ -379,6 +405,10 @@ export function SubscriptionProvider({
       setRevenueCatDiagnostic((d) => ({ ...d, lastInitError: msg }));
       if (__DEV__) {
         console.error("[RevenueCat] configure / getCustomerInfo failed:", e);
+      }
+      if (isDevFoodscanProBypass()) {
+        isProRef.current = true;
+        setIsPro(true);
       }
     } finally {
       setLoading(false);
@@ -473,6 +503,11 @@ export function SubscriptionProvider({
 
   const showPaywall = React.useCallback(
     async (options?: { forceShow?: boolean }): Promise<boolean> => {
+      if (isDevFoodscanProBypass()) {
+        isProRef.current = true;
+        setIsPro(true);
+        return true;
+      }
       if (!nativeAvailable || Purchases == null) {
         Alert.alert(
           "Purchases not available",
@@ -582,6 +617,11 @@ export function SubscriptionProvider({
     await reloadOfferingsOnly();
     const { count } = await getDailyScanCount();
     setScansUsedToday(count);
+    if (isDevFoodscanProBypass()) {
+      isProRef.current = true;
+      setIsPro(true);
+      void Purchases.setAttributes({ pro_subscriber: "true" }).catch(() => {});
+    }
   }, [nativeAvailable, reloadOfferingsOnly]);
 
   const value = React.useMemo(

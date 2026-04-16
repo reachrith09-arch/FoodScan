@@ -23,6 +23,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim() ??
     process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_?.trim() ??
     "";
+  const devUnlockPro = process.env.EXPO_PUBLIC_DEV_UNLOCK_PRO?.trim() ?? "";
 
   return {
     ...appJson.expo,
@@ -35,6 +36,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       expoPublicOpenAiVisionFallback: openAiVisionFallback,
       expoPublicSupabaseUrl: supabaseUrl,
       expoPublicSupabaseAnonKey: supabaseAnon,
+      ...(devUnlockPro ? { expoPublicDevUnlockPro: devUnlockPro } : {}),
       ...(rcOfferingId ? { revenueCatOfferingId: rcOfferingId } : {}),
       ...(rcEntitlementId ? { revenueCatEntitlementId: rcEntitlementId } : {}),
     },

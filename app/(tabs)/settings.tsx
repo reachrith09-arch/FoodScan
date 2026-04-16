@@ -9,6 +9,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Pressable,
+  Switch,
   Text as RNText,
   Share,
   useColorScheme,
@@ -23,7 +24,9 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Text } from "@/components/ui/text";
 import {
   clearAiThirdPartySharingConsent,
+  getAiThirdPartySharingConsent,
   isCloudFoodAssistantAvailable,
+  setAiThirdPartySharingConsent,
 } from "@/lib/ai-third-party-consent";
 import { isFoodRecognitionAvailable } from "@/lib/recognize-food";
 import { useSubscription } from "@/lib/revenuecat";
@@ -76,13 +79,38 @@ export default function SettingsScreen() {
     setUnits(u);
   };
 
+  const [aiSharingOn, setAiSharingOn] = React.useState<boolean | null>(null);
+
+  const refreshAiConsent = React.useCallback(async () => {
+    setAiSharingOn(await getAiThirdPartySharingConsent());
+  }, []);
+
+  const setAiSharing = React.useCallback(
+    async (on: boolean) => {
+      try {
+        if (on) {
+          await setAiThirdPartySharingConsent(true);
+          setAiSharingOn(true);
+        } else {
+          await clearAiThirdPartySharingConsent();
+          setAiSharingOn(false);
+        }
+      } catch {
+        Alert.alert("Couldn’t update", "Try again in a moment.");
+        await refreshAiConsent();
+      }
+    },
+    [refreshAiConsent],
+  );
+
   useFocusEffect(
     React.useCallback(() => {
       getSettings().then((s) => {
         setColorScheme(s.colorScheme);
         setDisplayUnits(s.units);
       });
-    }, []),
+      void refreshAiConsent();
+    }, [refreshAiConsent]),
   );
 
   const setBarVisible = React.useCallback(
@@ -149,26 +177,27 @@ export default function SettingsScreen() {
   const aiFeaturesConfigured =
     isCloudFoodAssistantAvailable() || isFoodRecognitionAvailable();
 
-  const handleResetAiConsent = () => {
-    Alert.alert(
-      "Reset AI sharing permission?",
-      "Next time you use Sprout or meal photo analysis, you will be asked again before any data is sent to AI services.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Reset",
-          style: "destructive",
-          onPress: () => {
-            void clearAiThirdPartySharingConsent();
-          },
-        },
-      ],
-    );
-  };
-
   const isDark = useColorScheme() === "dark";
   const textWhite = isDark ? { color: "#ffffff" as const } : undefined;
   const textMuted = isDark ? { color: "#a1a1aa" as const } : undefined;
+  /** Matches `Button variant="outline"` + `rounded-xl` (Export my data, etc.). */
+  const aiSharingOutlineStyle = React.useMemo(
+    () => ({
+      flexDirection: "row" as const,
+      alignItems: "center" as const,
+      justifyContent: "space-between" as const,
+      gap: 16,
+      minHeight: 44,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: isDark ? THEME.borderDark : THEME.borderLight,
+      backgroundColor: isDark ? THEME.darkCard : THEME.white,
+    }),
+    [isDark],
+  );
+
   return (
     <View
       className="flex-1"
@@ -350,20 +379,34 @@ export default function SettingsScreen() {
                   className="text-muted-foreground text-sm"
                   style={textMuted}
                 >
-                  Sprout and meal photo AI send data to third parties only after
-                  you agree on the consent screen. Exact URLs, categories of
-                  data, and subprocessors are in our privacy policy. Reset here
-                  to be asked again before the next send.
+                  When on, Sprout and meal photo AI may send your messages or
+                  images to OpenAI (and sometimes through our Supabase backend).
+                  Details are in our App Store privacy policy.
                 </Text>
               </CardHeader>
               <CardContent className="pt-0">
-                <Button
-                  variant="outline"
-                  onPress={handleResetAiConsent}
-                  className="min-h-[44px] rounded-xl"
-                >
-                  <Text style={textWhite}>Reset AI sharing permission</Text>
-                </Button>
+                <View style={aiSharingOutlineStyle}>
+                  <Text
+                    className="min-w-0 flex-1 text-base font-semibold"
+                    style={textWhite}
+                  >
+                    AI sharing
+                  </Text>
+                  <Switch
+                    accessibilityLabel="AI sharing"
+                    value={aiSharingOn === true}
+                    disabled={aiSharingOn === null}
+                    onValueChange={(on) => {
+                      void setAiSharing(on);
+                    }}
+                    trackColor={{
+                      false: isDark ? "#3f3f46" : "#d4d4d8",
+                      true: THEME.primary,
+                    }}
+                    thumbColor={isDark ? "#fafafa" : "#ffffff"}
+                    ios_backgroundColor={isDark ? "#3f3f46" : "#d4d4d8"}
+                  />
+                </View>
               </CardContent>
             </Card>
           ) : null}
@@ -441,7 +484,8 @@ export default function SettingsScreen() {
                   style={textMuted}
                 >
                   Optional AI (Sprout, meal photo) sends data to OpenAI and may
-                  route through our Supabase project—only after you consent.
+                  route through our Supabase project when AI sharing is on in
+                  Settings.
                 </Text>
               ) : null}
               <Text className="text-muted-foreground text-sm" style={textMuted}>
