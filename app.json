@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": "replaceme",
-    "slug": "replaceme",
+    "name": "FoodScan",
+    "slug": "foodscan",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "replaceme",
+    "scheme": "foodscan",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "bundleIdentifier": "com.example.replaceme",
+      "bundleIdentifier": "com.foodscan.app",
       "usesAppleSignIn": false,
       "supportsTablet": true,
       "infoPlist": {
@@ -33,7 +33,7 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ],
-      "package": "com.example.replaceme"
+      "package": "com.foodscan.app"
     },
     "web": {
       "output": "static",

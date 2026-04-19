@@ -39,6 +39,9 @@ yarn-error.*
 
 app-example
 
+# Accidental nested clone / duplicate (do not commit a repo inside the repo)
+FoodScan/
+
 # generated native folders
 /ios
 /android
